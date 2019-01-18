@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 
+	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/tylerdixon/bgchooser/bggclient"
 	"github.com/tylerdixon/bgchooser/storage"
@@ -44,27 +45,46 @@ func New() API {
 
 	http.Handle("/socket.io/", socketServer)
 	api.Router.HandleFunc("/rooms", NewRoom).Methods("POST")
-	api.Router.HandleFunc("/rooms/{ roomID }", api.GetRoomInfo).Methods("GET")
-	api.Router.HandleFunc("/rooms/{ roomID }/add/{ bggUserID }", api.AddBggUser).Methods("GET")
-	api.Router.HandleFunc("/rooms/{ roomID }/vote/{ user }", api.AddBggUser).Methods("POST")
+	api.Router.HandleFunc("/rooms/{roomID}", api.GetRoomInfo).Methods("GET")
+	api.Router.HandleFunc("/rooms/{roomID}/add/{bggUserID}", api.AddBggUser).Methods("POST")
+	api.Router.HandleFunc("/rooms/{roomID}/vote/{user}", api.AddBggUser).Methods("POST")
 	return api
 }
 
 func (a *API) Start(port string) error {
-	return http.ListenAndServe(port, a.Router)
+	return http.ListenAndServe(port, handlers.CORS()(a.Router))
+}
+
+type NewRoomRes struct {
+	RoomID string `json:"roomID"`
 }
 
 func NewRoom(w http.ResponseWriter, r *http.Request) {
-	id := fmt.Sprintf("%5d", rand.Intn(99999))
+	id := fmt.Sprintf("%05d", rand.Intn(99999))
+	res := NewRoomRes{
+		RoomID: id,
+	}
+	byteRes, err := json.Marshal(res)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
+	}
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(id))
+	w.Write(byteRes)
+}
+
+type AddBggUserRes struct {
+	Games []string `json:"games"`
 }
 
 func (a *API) AddBggUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	roomID := vars["roomID"]
 	bggUserID := vars["bggUserID"]
+	log.Printf("%+v", vars)
+	log.Println(vars["bggUserID"])
 	games, err := bggclient.GetUserCollection(bggUserID)
+	log.Println(games)
 
 	if err != nil {
 		// TODO: What status code?
@@ -81,8 +101,17 @@ func (a *API) AddBggUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	res := AddBggUserRes{
+		Games: games,
+	}
+	byteRes, err := json.Marshal(res)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
+		return
+	}
 	w.WriteHeader(http.StatusOK)
-	// TODO: return new games and alert users of games added
+	w.Write(byteRes)
 }
 
 type GetRoomInfoRes struct {
@@ -169,7 +198,8 @@ func (api *API) newSocketServer() (*socketio.Server, error) {
 	server.OnEvent("/", "register", func(s socketio.Conn, msg string) {
 		var ctx ConnectionContext
 		ctx.Close = api.Storage.SubscribeToRoomInfo(msg, func(msg storage.RoomSubscriptionMessage) {
-			s.Emit(string(msg.Type), msg.Message)
+			// TODO: return stuff
+			s.Emit(string(msg.Type), msg.User)
 		})
 		s.SetContext(ctx)
 	})
