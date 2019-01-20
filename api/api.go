@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
@@ -23,6 +24,10 @@ type API struct {
 
 type ConnectionContext struct {
 	Close func() error
+}
+
+func init() {
+	rand.Seed(time.Now().Unix())
 }
 
 func New() API {
@@ -74,7 +79,7 @@ func NewRoom(w http.ResponseWriter, r *http.Request) {
 }
 
 type AddBggUserRes struct {
-	Games []string `json:"games"`
+	Games []bggclient.Game `json:"games"`
 }
 
 func (a *API) AddBggUser(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +120,7 @@ func (a *API) AddBggUser(w http.ResponseWriter, r *http.Request) {
 }
 
 type GetRoomInfoRes struct {
-	Games []string           `json:"games"`
+	Games []bggclient.Game   `json:"games"`
 	Votes storage.VoteResult `json:"votes"`
 }
 
@@ -199,7 +204,11 @@ func (api *API) newSocketServer() (*socketio.Server, error) {
 		var ctx ConnectionContext
 		ctx.Close = api.Storage.SubscribeToRoomInfo(msg, func(msg storage.RoomSubscriptionMessage) {
 			// TODO: return stuff
-			s.Emit(string(msg.Type), msg.User)
+			gamesToEmit, err := json.Marshal(msg.Games)
+			if err != nil {
+				log.Println("Failed to marshal games to emit to user: " + err.Error())
+			}
+			s.Emit(string(msg.Type), msg.User, gamesToEmit)
 		})
 		s.SetContext(ctx)
 	})

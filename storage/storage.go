@@ -1,12 +1,14 @@
 package storage
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"log"
 	"strings"
 
 	"github.com/go-redis/redis"
+	"github.com/tylerdixon/bgchooser/bggclient"
 )
 
 const itemSep = ";;"
@@ -59,28 +61,36 @@ func New() (Storage, error) {
 // 	return room, err
 // }
 
-func (s *Storage) AddGamesToRoom(roomID, bggUser string, games []string) error {
-	gamesString := strings.Join(games, itemSep)
-	cmd := s.redisClient.HSet("games:"+roomID, bggUser, gamesString)
-	err := cmd.Err()
+func (s *Storage) AddGamesToRoom(roomID, bggUser string, games []bggclient.Game) error {
+	gamesToStore, err := json.Marshal(games)
 	if err != nil {
 		return err
 	}
-	pubCmd := s.redisClient.Publish(roomID, string(UpdateTypeAddedGames)+":"+bggUser+":"+gamesString)
+	cmd := s.redisClient.HSet("games:"+roomID, bggUser, gamesToStore)
+	err = cmd.Err()
+	if err != nil {
+		return err
+	}
+	pubCmd := s.redisClient.Publish(roomID, string(UpdateTypeAddedGames)+":"+bggUser+":"+string(gamesToStore))
 	return pubCmd.Err()
 }
 
-func (s *Storage) GetGamesForRoom(roomID string) ([]string, error) {
+func (s *Storage) GetGamesForRoom(roomID string) ([]bggclient.Game, error) {
 	cmd := s.redisClient.HGetAll("games:" + roomID)
 	res, err := cmd.Result()
 	if err != nil {
-		return []string{}, err
+		return []bggclient.Game{}, err
 	}
-	var games []string
+	var gamesToReturn []bggclient.Game
 	for _, gamesList := range res {
-		games = append(games, strings.Split(gamesList, itemSep)...)
+		var games []bggclient.Game
+		err := json.Unmarshal([]byte(gamesList), &games)
+		if err != nil {
+			return gamesToReturn, err
+		}
+		gamesToReturn = append(gamesToReturn, games...)
 	}
-	return games, nil
+	return gamesToReturn, nil
 }
 
 func (s *Storage) AddUserVotes(roomID, user string, votes, vetoes []string) error {
@@ -135,7 +145,7 @@ func (s *Storage) GetUserVotes(roomID string) (VoteResult, error) {
 
 type RoomSubscriptionMessage struct {
 	Type   UpdateType
-	Games  []string
+	Games  []bggclient.Game
 	Votes  []string
 	Vetoes []string
 	User   string
@@ -158,10 +168,15 @@ func (s *Storage) SubscribeToRoomInfo(roomID string, watchFn func(RoomSubscripti
 				if len(parts) != 3 {
 					log.Println("Error, malformed pubsub added games message: " + msg.Payload)
 				}
+				var games []bggclient.Game
+				err := json.Unmarshal([]byte(parts[2]), &games)
+				if err != nil {
+					log.Println("Error, malformed games in added games message: " + msg.Payload)
+				}
 				watchFn(RoomSubscriptionMessage{
 					Type:  UpdateType(parts[0]),
 					User:  parts[1],
-					Games: strings.Split(parts[2], itemSep),
+					Games: games,
 				})
 			case UpdateTypeAddedVotes:
 				if len(parts) != 4 {
