@@ -52,7 +52,7 @@ func New() API {
 	api.Router.HandleFunc("/rooms", NewRoom).Methods("POST")
 	api.Router.HandleFunc("/rooms/{roomID}", api.GetRoomInfo).Methods("GET")
 	api.Router.HandleFunc("/rooms/{roomID}/add/{bggUserID}", api.AddBggUser).Methods("POST")
-	api.Router.HandleFunc("/rooms/{roomID}/vote/{user}", api.AddBggUser).Methods("POST")
+	api.Router.HandleFunc("/rooms/{roomID}/vote/{userID}", api.AddVotesToRoom).Methods("POST")
 	return api
 }
 
@@ -120,8 +120,8 @@ func (a *API) AddBggUser(w http.ResponseWriter, r *http.Request) {
 }
 
 type GetRoomInfoRes struct {
-	Games []bggclient.Game   `json:"games"`
-	Votes storage.VoteResult `json:"votes"`
+	Games       []bggclient.Game   `json:"games"`
+	VoteResults storage.VoteResult `json:"voteResults"`
 }
 
 func (a *API) GetRoomInfo(w http.ResponseWriter, r *http.Request) {
@@ -142,8 +142,8 @@ func (a *API) GetRoomInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := GetRoomInfoRes{
-		Games: games,
-		Votes: votes,
+		Games:       games,
+		VoteResults: votes,
 	}
 
 	resBody, err := json.Marshal(res)

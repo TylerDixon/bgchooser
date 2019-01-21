@@ -107,8 +107,8 @@ func (s *Storage) AddUserVotes(roomID, user string, votes, vetoes []string) erro
 }
 
 type VoteResult struct {
-	Votes  map[string]int
-	Vetoes map[string]int
+	Votes  map[string][]string `json:"votes"`
+	Vetoes map[string][]string `json:"vetoes"`
 }
 
 func (s *Storage) GetUserVotes(roomID string) (VoteResult, error) {
@@ -119,25 +119,29 @@ func (s *Storage) GetUserVotes(roomID string) (VoteResult, error) {
 		return voteRes, err
 	}
 
-	for _, v := range res {
+	voteRes.Votes = make(map[string][]string)
+	voteRes.Vetoes = make(map[string][]string)
+	for user, v := range res {
 		split := strings.Split(v, "::")
 		if len(split) != 2 {
 			return voteRes, errors.New("Failed to split following string with \"::\": " + v)
 		}
 		votes := strings.Split(split[0], itemSep)
-		for _, game := range votes {
-			if _, ok := voteRes.Votes[game]; !ok {
-				voteRes.Votes[game] = 0
-			}
-			voteRes.Votes[game]++
-		}
+		voteRes.Votes[user] = votes
+		// for _, game := range votes {
+		// 	if _, ok := voteRes.Votes[game]; !ok {
+		// 		voteRes.Votes[game] = 0
+		// 	}
+		// 	voteRes.Votes[game]++
+		// }
 		vetoes := strings.Split(split[1], itemSep)
-		for _, game := range vetoes {
-			if _, ok := voteRes.Vetoes[game]; !ok {
-				voteRes.Vetoes[game] = 0
-			}
-			voteRes.Vetoes[game]++
-		}
+		voteRes.Vetoes[user] = vetoes
+		// for _, game := range vetoes {
+		// 	if _, ok := voteRes.Vetoes[game]; !ok {
+		// 		voteRes.Vetoes[game] = 0
+		// 	}
+		// 	voteRes.Vetoes[game]++
+		// }
 	}
 
 	return voteRes, nil

@@ -1,5 +1,6 @@
 import React, { Component } from "react";
 import { RouteComponentProps, Redirect, withRouter } from "react-router";
+import { Button } from "semantic-ui-react";
 
 class GetRoom extends Component<RouteComponentProps, any> {
   state = {
@@ -21,7 +22,7 @@ class GetRoom extends Component<RouteComponentProps, any> {
     return (
       <div>
         {roomID && <Redirect to={{ pathname: `/rooms/${roomID}` }} />}
-        <button onClick={this.getRoom}>Open Room</button>
+        <Button onClick={this.getRoom}>Open Room</Button>
       </div>
     );
   }
