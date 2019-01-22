@@ -100,11 +100,14 @@ func GetUserCollection(userID string) ([]Game, error) {
 	gameInfoWG.Add(1)
 	go func() {
 		defer gameInfoWG.Done()
-		for i, _ := range collRes.Games {
+		for i, game := range collRes.Games {
 			err := collRes.Games[i].getGameInfo()
 			if err != nil {
+				log.Println("Failed to get info for game " + game.Name)
+				log.Println(err)
 				infoErr = errors.Wrap(infoErr, err.Error())
 			}
+			time.Sleep(time.Millisecond * 750)
 		}
 	}()
 	gameInfoWG.Wait()

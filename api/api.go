@@ -7,14 +7,20 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
 	"github.com/tylerdixon/bgchooser/bggclient"
 	"github.com/tylerdixon/bgchooser/storage"
 	socketio "gopkg.in/googollee/go-socket.io.v1"
 )
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+} // use default options
 
 type API struct {
 	SocketServer *socketio.Server
@@ -48,7 +54,44 @@ func New() API {
 	api.SocketServer = socketServer
 	api.Router = mux.NewRouter()
 
-	http.Handle("/socket.io/", socketServer)
+	// api.Router.Handle("/socket.io/", socketServer)
+	echo := func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Print("upgrade:", err)
+			return
+		}
+		defer c.Close()
+		mt, message, err := c.ReadMessage()
+		// TODO: error if bad msg
+		roomID := strings.Split(string(message), ":")[1]
+		close := api.Storage.SubscribeToRoomInfo(roomID, func(msg storage.RoomSubscriptionMessage) {
+			log.Println(msg)
+			log.Println("asdfasdf2")
+			// TODO: return stuff
+			returnMsg, err := json.Marshal(msg)
+			if err != nil {
+				log.Println("Failed to marshal games to emit to user: " + err.Error())
+			}
+			log.Println(returnMsg)
+			c.WriteMessage(mt, returnMsg)
+		})
+		defer close()
+		for {
+			// mt, message, err := c.ReadMessage()
+			// if err != nil {
+			// 	log.Println("read:", err)
+			// 	break
+			// }
+			// log.Printf("recv: %s", message)
+			// err = c.WriteMessage(mt, message)
+			// if err != nil {
+			// 	log.Println("write:", err)
+			// 	break
+			// }
+		}
+	}
+	api.Router.HandleFunc("/echo", echo)
 	api.Router.HandleFunc("/rooms", NewRoom).Methods("POST")
 	api.Router.HandleFunc("/rooms/{roomID}", api.GetRoomInfo).Methods("GET")
 	api.Router.HandleFunc("/rooms/{roomID}/add/{bggUserID}", api.AddBggUser).Methods("POST")
@@ -57,7 +100,7 @@ func New() API {
 }
 
 func (a *API) Start(port string) error {
-	return http.ListenAndServe(port, handlers.CORS()(a.Router))
+	return http.ListenAndServe(port, handlers.CORS(handlers.AllowCredentials(), handlers.AllowedOrigins([]string{"http://localhost:3000"}))(a.Router))
 }
 
 type NewRoomRes struct {
@@ -201,13 +244,18 @@ func (api *API) newSocketServer() (*socketio.Server, error) {
 		return nil
 	})
 	server.OnEvent("/", "register", func(s socketio.Conn, msg string) {
+		log.Println(msg)
+		log.Println("asdfasdf")
 		var ctx ConnectionContext
 		ctx.Close = api.Storage.SubscribeToRoomInfo(msg, func(msg storage.RoomSubscriptionMessage) {
+			log.Println(msg)
+			log.Println("asdfasdf2")
 			// TODO: return stuff
 			gamesToEmit, err := json.Marshal(msg.Games)
 			if err != nil {
 				log.Println("Failed to marshal games to emit to user: " + err.Error())
 			}
+			log.Println(string(msg.Type))
 			s.Emit(string(msg.Type), msg.User, gamesToEmit)
 		})
 		s.SetContext(ctx)

@@ -1,5 +1,62 @@
+@import './variables.scss';
+
 .voteIcon{
     position: absolute;
     top: 0;
     left: 0;
+}
+
+// %imageOverlay {
+//     position: absolute;
+//     bottom: 5px;
+//     height: 30px;
+//     width: 30px;
+//     line-height: 30px;
+//     border-radius: 50%;
+//     color: $white;
+//     text-align: center;
+//     font-weight: bold;
+//     box-shadow: 1px 1px 5px rgba(0,0,0, .3);
+// }
+
+// .imageVoteOverlay {
+//     @extend %imageOverlay;
+//     background-color: $green;
+//     left: 10px;
+// }
+
+// .imageVetoOverlay {
+//     @extend %imageOverlay;
+//     background-color: $red;
+//     right: 55px;
+// }
+
+%imageOverlay {
+    position: absolute;
+    bottom: 5px;
+    height: 30px;
+    width: 30px;
+    line-height: 15px;
+    color: $white;
+    font-weight: bold;
+    border-radius: 0;
+    text-align: center;
+    line-height: 30px;
+    font-size: 16px;
+}
+$bgTransparency: 0.9;
+.imageVoteOverlay {
+    @extend %imageOverlay;
+    border: 0;
+    background-color: rgba($green, $bgTransparency);
+    bottom: 14px;
+    left: 21px;
+}
+
+.imageVetoOverlay {
+    @extend %imageOverlay;
+    border: 0;
+    background-color: rgba($red, $bgTransparency);
+    right: 63px;
+    bottom: 14px;
 }

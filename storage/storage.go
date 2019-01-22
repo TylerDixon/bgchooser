@@ -71,7 +71,7 @@ func (s *Storage) AddGamesToRoom(roomID, bggUser string, games []bggclient.Game)
 	if err != nil {
 		return err
 	}
-	pubCmd := s.redisClient.Publish(roomID, string(UpdateTypeAddedGames)+":"+bggUser+":"+string(gamesToStore))
+	pubCmd := s.redisClient.Publish(roomID, string(UpdateTypeAddedGames)+"::"+bggUser+"::"+string(gamesToStore))
 	return pubCmd.Err()
 }
 
@@ -102,7 +102,7 @@ func (s *Storage) AddUserVotes(roomID, user string, votes, vetoes []string) erro
 		return err
 	}
 
-	pubCmd := s.redisClient.Publish(roomID, UpdateTypeAddedVotes+":"+user+":"+votesString+":"+vetoesString)
+	pubCmd := s.redisClient.Publish("room:"+roomID, UpdateTypeAddedVotes+"::"+user+"::"+votesString+"::"+vetoesString)
 	return pubCmd.Err()
 }
 
@@ -149,10 +149,10 @@ func (s *Storage) GetUserVotes(roomID string) (VoteResult, error) {
 
 type RoomSubscriptionMessage struct {
 	Type   UpdateType
-	Games  []bggclient.Game
-	Votes  []string
-	Vetoes []string
-	User   string
+	Games  []bggclient.Game `json:"games"`
+	Votes  []string         `json:"votes"`
+	Vetoes []string         `json:"vetoes"`
+	User   string           `json:"user"`
 }
 
 func (s *Storage) SubscribeToRoomInfo(roomID string, watchFn func(RoomSubscriptionMessage)) func() error {
@@ -162,7 +162,7 @@ func (s *Storage) SubscribeToRoomInfo(roomID string, watchFn func(RoomSubscripti
 		for {
 			msg := <-channel
 			// TODO: Validate parts
-			parts := strings.Split(msg.Payload, ":")
+			parts := strings.Split(msg.Payload, "::")
 			if len(parts) == 0 {
 				log.Println("Error, malformed pubsub message: " + msg.Payload)
 				return
