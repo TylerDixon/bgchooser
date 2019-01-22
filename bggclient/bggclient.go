@@ -95,6 +95,7 @@ func GetUserCollection(userID string) ([]Game, error) {
 		return []Game{}, err
 	}
 
+	log.Println("recieved collection for user: " + userID)
 	var infoErr error
 	var gameInfoWG sync.WaitGroup
 	gameInfoWG.Add(1)
@@ -102,12 +103,13 @@ func GetUserCollection(userID string) ([]Game, error) {
 		defer gameInfoWG.Done()
 		for i, game := range collRes.Games {
 			err := collRes.Games[i].getGameInfo()
+			log.Println("recieved info for game: " + game.Name)
 			if err != nil {
 				log.Println("Failed to get info for game " + game.Name)
 				log.Println(err)
 				infoErr = errors.Wrap(infoErr, err.Error())
 			}
-			time.Sleep(time.Millisecond * 750)
+			time.Sleep(time.Second)
 		}
 	}()
 	gameInfoWG.Wait()

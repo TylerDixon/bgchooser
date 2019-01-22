@@ -73,6 +73,44 @@ class Game {
       this.vetoes.splice(userIndex, 1);
     }
   }
+
+  handleUser(user: string, votes: Array<string>, vetoes: Array<string>) {
+    const userVetoIndex = this.vetoes.indexOf(user);
+    const userVoteIndex = this.votes.indexOf(user);
+    const gameVoteIndex = votes.indexOf(this.name);
+    const gameVetoIndex = vetoes.indexOf(this.name);
+    if (gameVoteIndex > -1) {
+      if (userVoteIndex === -1) {
+        this.votes.push(user);
+      }
+    } else if (gameVoteIndex === -1) {
+      if (userVoteIndex > -1) {
+        this.votes.splice(userVoteIndex, 1);
+      }
+    }
+    if (gameVetoIndex > -1) {
+      if (userVetoIndex === -1) {
+        this.vetoes.push(user);
+      }
+    } else if (gameVetoIndex === -1) {
+      if (userVetoIndex > -1) {
+        this.vetoes.splice(userVetoIndex, 1);
+      }
+    }
+  }
+}
+
+enum UpdateType {
+  UpdateTypeAddedGames = "addedGamesUpdate",
+  UpdateTypeAddedVotes = "addedVotesUpdate",
+}
+
+interface SubscriptionMessage {
+  type: UpdateType;
+  games: Array<Game>;
+  votes: Array<string>;
+  vetoes: Array<string>;
+  user: string;
 }
 
 interface GameInfo {
@@ -156,6 +194,8 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
     sortBy: Sort.AlphaAsc
   };
 
+  socket: WebSocket = new WebSocket("ws://localhost:8000/echo");
+
   componentDidMount = () => {
     const { roomID } = this.props.match.params;
     const { filters, games } = this.state;
@@ -189,22 +229,19 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
         this.setState({ initError: err });
       });
 
-    // client.emit('register', roomID)
-    // client.on('addedVotesUpdate', function () { console.log('asdf'); console.log(arguments) })
-    // client.addEventListener('addedVotesUpdate', function () { console.log('asdf'); console.log(arguments) })
-    // client.on('addedVetoesUpdate', function () { console.log(arguments) })
-
-    const ws = new WebSocket("ws://localhost:8000/echo");
-    ws.onopen = function (evt) {
-      ws.send('register:' + roomID)
+    this.socket.onopen = evt => {
+      this.socket.send('register:' + roomID)
     }
-    ws.onclose = function (evt) {
-      console.log("CLOSE");
+    this.socket.onmessage = evt => {
+      console.log(evt.data);
+      const data: SubscriptionMessage = JSON.parse(evt.data);
+      if (data.type === UpdateType.UpdateTypeAddedVotes) {
+        this.state.games.toArray().forEach(game => game.handleUser(data.user, data.votes, data.vetoes))
+      }
+      this.setState({ games: this.state.games });
+      this.forceUpdate()
     }
-    ws.onmessage = function (evt) {
-      console.log("RESPONSE: " + evt.data);
-    }
-    ws.onerror = function (evt) {
+    this.socket.onerror = function (evt) {
       console.log("ERROR: " + evt);
     }
   }

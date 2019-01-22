@@ -148,7 +148,7 @@ func (s *Storage) GetUserVotes(roomID string) (VoteResult, error) {
 }
 
 type RoomSubscriptionMessage struct {
-	Type   UpdateType
+	Type   UpdateType       `json:"type"`
 	Games  []bggclient.Game `json:"games"`
 	Votes  []string         `json:"votes"`
 	Vetoes []string         `json:"vetoes"`
@@ -161,6 +161,9 @@ func (s *Storage) SubscribeToRoomInfo(roomID string, watchFn func(RoomSubscripti
 	go func() {
 		for {
 			msg := <-channel
+			if msg == nil {
+				return
+			}
 			// TODO: Validate parts
 			parts := strings.Split(msg.Payload, "::")
 			if len(parts) == 0 {

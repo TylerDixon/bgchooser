@@ -77,18 +77,18 @@ func New() API {
 			c.WriteMessage(mt, returnMsg)
 		})
 		defer close()
-		for {
-			// mt, message, err := c.ReadMessage()
-			// if err != nil {
-			// 	log.Println("read:", err)
-			// 	break
-			// }
-			// log.Printf("recv: %s", message)
-			// err = c.WriteMessage(mt, message)
-			// if err != nil {
-			// 	log.Println("write:", err)
-			// 	break
-			// }
+		shouldClose := false
+		c.SetCloseHandler(func(code int, msg string) error {
+			shouldClose = true
+			close()
+			return nil
+		})
+		for !shouldClose {
+			_, _, err := c.ReadMessage()
+			if err != nil {
+				log.Println("socket err: " + err.Error())
+				break
+			}
 		}
 	}
 	api.Router.HandleFunc("/echo", echo)
