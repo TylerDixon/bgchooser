@@ -49,7 +49,7 @@ type Tag struct {
 	Label string `xml:"value,attr" json:"label"`
 }
 
-func GetUserCollection(userID string) ([]Game, error) {
+func GetUserCollection(userID string, currentGames []Game, progressUpdater func(float32, Game, bool, error)) ([]Game, error) {
 	var res *http.Response
 	var err error
 	var wg sync.WaitGroup
@@ -102,14 +102,27 @@ func GetUserCollection(userID string) ([]Game, error) {
 	go func() {
 		defer gameInfoWG.Done()
 		for i, game := range collRes.Games {
-			err := collRes.Games[i].getGameInfo()
-			log.Println("recieved info for game: " + game.Name)
-			if err != nil {
-				log.Println("Failed to get info for game " + game.Name)
-				log.Println(err)
-				infoErr = errors.Wrap(infoErr, err.Error())
+			hasGame := false
+			var retrievedGame Game
+			for _, currentGame := range currentGames {
+				if currentGame.Name == game.Name {
+					hasGame = true
+					retrievedGame = currentGame
+				}
 			}
-			time.Sleep(time.Second)
+			if !hasGame {
+				err := collRes.Games[i].getGameInfo()
+				log.Println("recieved info for game: " + game.Name)
+				if err != nil {
+					log.Println("Failed to get info for game " + game.Name)
+					log.Println(err)
+					infoErr = errors.Wrap(infoErr, err.Error())
+				}
+				progressUpdater(float32(i+1)/float32(len(collRes.Games)), collRes.Games[i], true, err)
+				time.Sleep(time.Second)
+			} else {
+				progressUpdater(float32(i+1)/float32(len(collRes.Games)), retrievedGame, false, err)
+			}
 		}
 	}()
 	gameInfoWG.Wait()

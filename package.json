@@ -1,6 +1,7 @@
 {
   "name": "app",
   "version": "0.1.0",
+  "homepage": "https://protestcat.com/",
   "private": true,
   "dependencies": {
     "@types/jest": "23.3.12",

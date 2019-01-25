@@ -52,7 +52,7 @@ func New() API {
 	}
 
 	api.SocketServer = socketServer
-	api.Router = mux.NewRouter()
+	api.Router = mux.NewRouter().PathPrefix("/api").Subrouter().StrictSlash(false)
 
 	// api.Router.Handle("/socket.io/", socketServer)
 	echo := func(w http.ResponseWriter, r *http.Request) {
@@ -91,16 +91,29 @@ func New() API {
 			}
 		}
 	}
+
+	// fs := http.FileServer(http.Dir("build"))
+	// api.Router.Handle("/", fs)
+	// api.Router.Handle("/static/", http.FileServer(http.Dir("./build")))
+	// api.Router.Handle("/static/css", http.FileServer(http.Dir("./build")))
+	// Serve static files
+	api.Router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./build/static/"))))
+
+	// Serve index page on all unhandled routes
 	api.Router.HandleFunc("/echo", echo)
 	api.Router.HandleFunc("/rooms", NewRoom).Methods("POST")
 	api.Router.HandleFunc("/rooms/{roomID}", api.GetRoomInfo).Methods("GET")
-	api.Router.HandleFunc("/rooms/{roomID}/add/{bggUserID}", api.AddBggUser).Methods("POST")
+	api.Router.HandleFunc("/rooms/{roomID}/add/{bggUserID}", api.AddBggUser)
 	api.Router.HandleFunc("/rooms/{roomID}/vote/{userID}", api.AddVotesToRoom).Methods("POST")
+	api.Router.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "./build/index.html")
+	})
 	return api
 }
 
 func (a *API) Start(port string) error {
-	return http.ListenAndServe(port, handlers.CORS(handlers.AllowCredentials(), handlers.AllowedOrigins([]string{"http://localhost:3000"}))(a.Router))
+	log.Println("Listening on port " + port)
+	return http.ListenAndServe(port, handlers.CORS(handlers.AllowCredentials(), handlers.AllowedOrigins([]string{"*"}))(a.Router))
 }
 
 type NewRoomRes struct {
@@ -125,21 +138,60 @@ type AddBggUserRes struct {
 	Games []bggclient.Game `json:"games"`
 }
 
+type AddGamesMessage struct {
+	Progress float32        `json:"progress"`
+	Game     bggclient.Game `json:"game"`
+	Error    string         `json:"error"`
+	NewGame  bool           `json:"newGame"`
+}
+
 func (a *API) AddBggUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	roomID := vars["roomID"]
 	bggUserID := vars["bggUserID"]
-	log.Printf("%+v", vars)
-	log.Println(vars["bggUserID"])
-	games, err := bggclient.GetUserCollection(bggUserID)
-	log.Println(games)
 
+	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		// TODO: What status code?
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
+		log.Print("upgrade:", err)
 		return
 	}
+	defer c.Close()
+	mt, _, err := c.ReadMessage()
+	log.Println("initial msg read")
+	if err != nil {
+		log.Println("add games read message err:", err)
+		return
+	}
+	log.Printf("%+v", vars)
+	log.Println(vars["bggUserID"])
+
+	currentGames, err := a.Storage.GetGamesForRoom(roomID)
+	if err != nil {
+		log.Println("failed to get current games when adding bgg user, roomID: " + roomID)
+	}
+
+	games, err := bggclient.GetUserCollection(bggUserID, currentGames, func(progress float32, game bggclient.Game, isNewGame bool, progressErr error) {
+		var errString string
+		if progressErr != nil {
+			errString = progressErr.Error()
+		}
+		msg, err := json.Marshal(AddGamesMessage{
+			Progress: progress,
+			Game:     game,
+			Error:    errString,
+			NewGame:  isNewGame,
+		})
+		if err != nil {
+			log.Println("Failed to marshall addgamemessage: " + err.Error())
+		}
+		c.WriteMessage(mt, msg)
+		if progress == 1 {
+			// err = c.Close()
+			// if err != nil {
+			// 	log.Println("error closing out socket: " + err.Error())
+			// }
+		}
+	})
 
 	err = a.Storage.AddGamesToRoom(roomID, bggUserID, games)
 	if err != nil {
@@ -149,17 +201,17 @@ func (a *API) AddBggUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res := AddBggUserRes{
-		Games: games,
-	}
-	byteRes, err := json.Marshal(res)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	w.Write(byteRes)
+	// res := AddBggUserRes{
+	// 	Games: games,
+	// }
+	// byteRes, err := json.Marshal(res)
+	// if err != nil {
+	// 	w.WriteHeader(http.StatusInternalServerError)
+	// 	w.Write([]byte(err.Error()))
+	// 	return
+	// }
+	// w.WriteHeader(http.StatusOK)
+	// w.Write(byteRes)
 }
 
 type GetRoomInfoRes struct {

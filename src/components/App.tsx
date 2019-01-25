@@ -4,11 +4,7 @@ import GetRoom from "./GetRoom";
 import Room from "./Room";
 import styles from "./app.module.scss";
 
-interface AppState {
-  roomID: string;
-}
-
-class App extends Component<any, AppState> {
+class App extends Component<any, any> {
   render() {
     return (
       <div className={styles.app}>

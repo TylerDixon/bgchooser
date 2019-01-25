@@ -8,7 +8,7 @@ class GetRoom extends Component<RouteComponentProps, any> {
   };
 
   getRoom = () => {
-    fetch("http://localhost:8000/rooms", {
+    fetch("/api/rooms", {
       method: "POST"
     })
       .then(res => res.json())
