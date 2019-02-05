@@ -1,0 +1,116 @@
+@import "./variables.scss";
+.introModal {
+}
+.animationContainer {
+}
+.imageContainer {
+  position: relative;
+  display: inline-block;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.icon {
+  position: absolute !important;
+  margin: 0 auto !important;
+  top: 50%;
+  transform: translateY(-50%);
+  left: 0;
+  right: 0;
+}
+
+.middleIcon {
+  animation: redgreen;
+  animation-iteration-count: infinite;
+  animation-duration: 3s;
+  background-color: transparent !important;
+}
+
+.pointerIcon {
+  position: absolute !important;
+  right: 25px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 40px !important;
+  color: white;
+  text-shadow: 0 0 3px black;
+  animation: leftright linear;
+  animation-iteration-count: infinite;
+  animation-duration: 1s;
+  // animation-timing-function: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.imageOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 100%;
+  width: 100%;
+  animation: redgreen linear;
+  animation-iteration-count: infinite;
+  animation-duration: 3s;
+}
+
+$bgTransparency: 0.2;
+@keyframes redgreen {
+  0% {
+    background-color: transparent;
+    color: black;
+  }
+  27% {
+    background-color: transparent;
+    color: black;
+  }
+  33% {
+    background-color: rgba($green, $bgTransparency);
+    color: $green;
+  }
+  60% {
+    background-color: rgba($green, $bgTransparency);
+    color: $green;
+  }
+  66% {
+    background-color: rgba($red, $bgTransparency);
+    color: $red;
+  }
+  93% {
+    background-color: rgba($red, $bgTransparency);
+    color: $red;
+  }
+  100% {
+    background-color: transparent;
+    color: black;
+  }
+}
+
+@keyframes leftright {
+  0% {
+    right: -25px;
+  }
+
+  80% {
+    right: -25px;
+  }
+
+  90% {
+    right: -10px;
+  }
+  100% {
+    right: -25px;
+  }
+}
+
+.voteDescription {
+  color: lighten(black, 30);
+}
+
+.voteDescription .yesVote {
+  color: $green;
+}
+.voteDescription .veto {
+  color: $red;
+}
+.voteDescription .undoVote {
+  color: black;
+}

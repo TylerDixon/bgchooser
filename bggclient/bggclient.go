@@ -3,7 +3,6 @@ package bggclient
 import (
 	"encoding/xml"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"sync"
@@ -20,15 +19,14 @@ type Game struct {
 	ID        string   `xml:"objectid,attr" json:"id"`
 	Name      string   `xml:"name" json:"name"`
 	Thumbnail string   `xml:"thumbnail" json:"thumbnail"`
-	Info      GameInfo `json:"info"`
+	Info      GameInfo `xml:"stats" json:"info"`
 }
 
 type GameInfo struct {
-	MinPlayers  int   `json:"minPlayers"`
-	MaxPlayers  int   `json:"maxPlayers"`
-	MinPlaytime int   `json:"minPlaytime"`
-	MaxPlaytime int   `json:"maxPlaytime"`
-	Tags        []Tag `json:"tags"`
+	MinPlayers  int `xml:"minplayers,attr" json:"minPlayers"`
+	MaxPlayers  int `xml:"maxplayers,attr" json:"maxPlayers"`
+	MinPlaytime int `xml:"minplaytime,attr" json:"minPlaytime"`
+	MaxPlaytime int `xml:"maxplaytime,attr" json:"maxPlaytime"`
 }
 
 type parsedGameInfo struct {
@@ -49,24 +47,24 @@ type Tag struct {
 	Label string `xml:"value,attr" json:"label"`
 }
 
-func GetUserCollection(userID string, currentGames []Game, progressUpdater func(float32, Game, bool, error)) ([]Game, error) {
+func GetUserCollection(userID string, currentGames []Game) ([]Game, error) {
 	var res *http.Response
 	var err error
 	var wg sync.WaitGroup
 	wg.Add(1)
 	numRetries := 0
 
-	log.Println("asdf")
-	log.Println(userID)
 	go func() {
 		defer wg.Done()
-		log.Println("asdf")
-		log.Println(userID)
-		res, err = http.Get("https://boardgamegeek.com/xmlapi2/collection?username=" + url.QueryEscape(userID) + "&own=1&excludesubtype=boardgameexpansion")
+		reqString := "https://boardgamegeek.com/xmlapi2/collection?username=" + url.QueryEscape(userID) + "&own=1&excludesubtype=boardgameexpansion&stats=1&wishlist=0"
+		res, err = http.Get(reqString)
 		for res.StatusCode == 202 && err == nil && numRetries < 10 {
 			numRetries++
-			time.Sleep(500 * time.Second)
-			res, err = http.Get("https://boardgamegeek.com/xmlapi2/collection?username=" + url.QueryEscape(userID) + "&own=1&excludesubtype=boardgameexpansion")
+			time.Sleep(time.Second)
+			res, err = http.Get(reqString)
+			if res.StatusCode == 202 {
+				err = nil
+			}
 		}
 		if numRetries >= 10 {
 			err = errors.New("exceeded number of retries")
@@ -91,42 +89,40 @@ func GetUserCollection(userID string, currentGames []Game, progressUpdater func(
 
 	var collRes collectionRes
 	err = xml.Unmarshal(body, &collRes)
-	if err != nil {
-		return []Game{}, err
-	}
 
-	log.Println("recieved collection for user: " + userID)
-	var infoErr error
-	var gameInfoWG sync.WaitGroup
-	gameInfoWG.Add(1)
-	go func() {
-		defer gameInfoWG.Done()
-		for i, game := range collRes.Games {
-			hasGame := false
-			var retrievedGame Game
-			for _, currentGame := range currentGames {
-				if currentGame.Name == game.Name {
-					hasGame = true
-					retrievedGame = currentGame
-				}
-			}
-			if !hasGame {
-				err := collRes.Games[i].getGameInfo()
-				log.Println("recieved info for game: " + game.Name)
-				if err != nil {
-					log.Println("Failed to get info for game " + game.Name)
-					log.Println(err)
-					infoErr = errors.Wrap(infoErr, err.Error())
-				}
-				progressUpdater(float32(i+1)/float32(len(collRes.Games)), collRes.Games[i], true, err)
-				time.Sleep(time.Second)
-			} else {
-				progressUpdater(float32(i+1)/float32(len(collRes.Games)), retrievedGame, false, err)
-			}
-		}
-	}()
-	gameInfoWG.Wait()
-	return collRes.Games, infoErr
+	return collRes.Games, err
+	// var infoErr error
+	// Leaving out getting game info for now, this will probably need to move out to it's own microservice
+	// var gameInfoWG sync.WaitGroup
+	// gameInfoWG.Add(1)
+	// go func() {
+	// 	defer gameInfoWG.Done()
+	// 	for i, game := range collRes.Games {
+	// 		hasGame := false
+	// 		var retrievedGame Game
+	// 		for _, currentGame := range currentGames {
+	// 			if currentGame.Name == game.Name {
+	// 				hasGame = true
+	// 				retrievedGame = currentGame
+	// 			}
+	// 		}
+	// 		if !hasGame {
+	// 			err := collRes.Games[i].getGameInfo()
+	// 			log.Println("recieved info for game: " + game.Name)
+	// 			if err != nil {
+	// 				log.Println("Failed to get info for game " + game.Name)
+	// 				log.Println(err)
+	// 				infoErr = errors.Wrap(infoErr, err.Error())
+	// 			}
+	// 			progressUpdater(float32(i+1)/float32(len(collRes.Games)), collRes.Games[i], true, err)
+	// 			time.Sleep(time.Second)
+	// 		} else {
+	// 			progressUpdater(float32(i+1)/float32(len(collRes.Games)), retrievedGame, false, err)
+	// 		}
+	// 	}
+	// }()
+	// gameInfoWG.Wait()
+	// return collRes.Games, infoErr
 }
 
 func (game *Game) getGameInfo() error {
@@ -156,7 +152,6 @@ func (game *Game) getGameInfo() error {
 			tagsToKeep = append(tagsToKeep, tag)
 		}
 	}
-	game.Info.Tags = tagsToKeep
 	game.Info.MaxPlayers = gameInfo.MaxPlayers.Value
 	game.Info.MinPlayers = gameInfo.MinPlayers.Value
 	game.Info.MaxPlaytime = gameInfo.MaxPlaytime.Value

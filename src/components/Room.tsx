@@ -28,10 +28,22 @@ import _ from "lodash";
 import { withRouter } from "react-router-dom";
 import { RouteComponentProps } from "react-router";
 import classnames from "classnames";
+import copy from "copy-to-clipboard";
 import io from "socket.io-client";
 import Loading from "./Loading";
 import styles from "./room.module.scss";
 import { string } from "prop-types";
+import IntroModal from "./IntroModal";
+import {
+  Game,
+  GameCollection,
+  Tag,
+  VoteObj,
+  RoomInfo,
+  SubscriptionMessage,
+  UpdateType
+} from "../types/game";
+import AddUserModal from "./AddUserModal";
 
 // const client = io("http://localhost:8000")
 
@@ -41,141 +53,6 @@ enum Sort {
   PlaytimeDesc,
   PlaytimeAsc,
   VotesDesc
-}
-
-interface GameMap {
-  [key: string]: Game;
-}
-class GameCollection {
-  public games: GameMap = {};
-
-  addGames(games: Array<Game>) {
-    games.forEach(game => {
-      if (!this.games[game.name]) {
-        this.games[game.name] = new Game(game.thumbnail, game.name, game.info);
-      }
-    });
-  }
-
-  toArray(): Array<Game> {
-    return Object.keys(this.games).map(key => this.games[key]);
-  }
-}
-
-class Game {
-  public thumbnail: string;
-  public name: string;
-  public info: GameInfo;
-  public votes: Array<string> = [];
-  public vetoes: Array<string> = [];
-
-  constructor(thumbnail: string, name: string, info: GameInfo) {
-    this.thumbnail = thumbnail;
-    this.name = name;
-    this.info = info;
-  }
-
-  addVote(user: string) {
-    if (this.votes.indexOf(user) === -1) {
-      this.votes.push(user);
-    }
-  }
-
-  removeVote(user: string) {
-    const userIndex = this.votes.indexOf(user);
-    if (userIndex > -1) {
-      this.votes.splice(userIndex, 1);
-    }
-  }
-
-  addVeto(user: string) {
-    if (this.vetoes.indexOf(user) === -1) {
-      this.vetoes.push(user);
-    }
-  }
-
-  removeVeto(user: string) {
-    const userIndex = this.vetoes.indexOf(user);
-    if (userIndex > -1) {
-      this.vetoes.splice(userIndex, 1);
-    }
-  }
-
-  handleUser(user: string, votes: Array<string>, vetoes: Array<string>) {
-    const userVetoIndex = this.vetoes.indexOf(user);
-    const userVoteIndex = this.votes.indexOf(user);
-    const gameVoteIndex = votes.indexOf(this.name);
-    const gameVetoIndex = vetoes.indexOf(this.name);
-    if (gameVoteIndex > -1) {
-      if (userVoteIndex === -1) {
-        this.votes.push(user);
-      }
-    } else if (gameVoteIndex === -1) {
-      if (userVoteIndex > -1) {
-        this.votes.splice(userVoteIndex, 1);
-      }
-    }
-    if (gameVetoIndex > -1) {
-      if (userVetoIndex === -1) {
-        this.vetoes.push(user);
-      }
-    } else if (gameVetoIndex === -1) {
-      if (userVetoIndex > -1) {
-        this.vetoes.splice(userVetoIndex, 1);
-      }
-    }
-  }
-}
-
-enum UpdateType {
-  UpdateTypeAddedGames = "addedGamesUpdate",
-  UpdateTypeAddedVotes = "addedVotesUpdate"
-}
-
-interface SubscriptionMessage {
-  type: UpdateType;
-  games: Array<Game>;
-  votes: Array<string>;
-  vetoes: Array<string>;
-  user: string;
-}
-
-interface GameInfo {
-  minPlayers: number;
-  maxPlayers: number;
-  minPlaytime: number;
-  maxPlaytime: number;
-  tags?: Array<Tag>;
-}
-
-interface Tag {
-  id: string;
-  label: string;
-}
-
-interface AddBggUserRes {
-  games: Array<Game>;
-}
-
-interface AddGamesMessage {
-  progress: number;
-  game: Game;
-  error: string;
-  newGame: boolean;
-}
-
-interface RoomInfo {
-  games: Array<Game>;
-  voteResults: VoteResults;
-}
-
-interface VoteObj {
-  [key: string]: Array<string>;
-}
-
-interface VoteResults {
-  votes: VoteObj;
-  vetoes: VoteObj;
 }
 
 interface RoomState {
@@ -202,6 +79,8 @@ interface RoomState {
   sortBy: Sort;
   addingGamesProgress: number;
   latestGameAdded: string;
+  showVotes: boolean;
+  introModalOpen: boolean;
 }
 
 interface RoomRouteParams {
@@ -229,7 +108,9 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
     savingVotes: false,
     sortBy: Sort.AlphaAsc,
     addingGamesProgress: 0,
-    latestGameAdded: ""
+    latestGameAdded: "",
+    showVotes: false,
+    introModalOpen: false
   };
 
   //TODO: Better way to handle? (don't need state)
@@ -241,8 +122,12 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
     const { roomID } = this.props.match.params;
     const { filters, games } = this.state;
     let userID: string =
-      localStorage.getItem("userID") || Math.floor(Math.random() * 10000) + "";
-    localStorage.setItem("userID", userID);
+      localStorage.getItem(roomID + ":userID") ||
+      Math.floor(Math.random() * 10000) + "";
+    if (!localStorage.getItem(roomID + ":userID")) {
+      this.setState({ introModalOpen: true });
+    }
+    localStorage.setItem(roomID + ":userID", userID);
     this.setState({ userID });
     fetch(`/api/rooms/${roomID}`)
       .then(res => res.json())
@@ -298,22 +183,23 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
         this.state.games
           .toArray()
           .forEach(game => game.handleUser(data.user, data.votes, data.vetoes));
+      } else if (data.type === UpdateType.UpdateTypeAddedGames) {
+        this.state.games.addGames(data.games);
       }
       this.setState({ games: this.state.games });
       this.forceUpdate();
     };
-    this.socket.onerror = function(evt) {
-      console.log("ERROR: " + evt);
+    this.socket.onerror = evt => {
+      this.setState({
+        initError: new Error(
+          "Error connecting to service. Refresh page to try again."
+        )
+      });
     };
   };
 
   toggleBggUserModal = () => {
     this.setState({ bggUserModalOpen: !this.state.bggUserModalOpen });
-  };
-
-  onUpdateBggUser = (e: ChangeEvent<HTMLElement>) => {
-    let element = e.currentTarget as HTMLInputElement;
-    this.setState({ bggUser: element.value });
   };
 
   onPlayerNumberChange = (e: SyntheticEvent, data: DropdownProps) => {
@@ -323,48 +209,10 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
     });
   };
 
-  getBggUser = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const { roomID } = this.props.match.params;
-    const { bggUser, games } = this.state;
-    if (bggUser.length === 0) {
-      return;
-    }
-    this.setState({ loadingGames: true, fetchError: undefined });
-    const addGamesSocket = new WebSocket(
-      `wss://${location.host}/api/rooms/${roomID}/add/${bggUser}`
-    );
-    addGamesSocket.onopen = e => {
-      console.log(e);
-      addGamesSocket.send("ack");
-    };
-    addGamesSocket.onmessage = e => {
-      console.log(e);
-      var msg: AddGamesMessage = JSON.parse(e.data);
-      if (msg.newGame) {
-        games.addGames([msg.game]);
-      }
-      this.setState({
-        addingGamesProgress: msg.progress,
-        latestGameAdded: msg.game.name
-      });
-      if (msg.progress === 1) {
-        this.setState({
-          games: games,
-          addingGamesProgress: 0,
-          bggUserModalOpen: false,
-          loadingGames: false
-        });
-      }
-    };
-    addGamesSocket.onerror = e => {
-      this.setState({
-        fetchError: new Error(
-          "Failed to retrieve BGG user. This user may not exist or have no collection."
-        ),
-        loadingGames: false
-      });
-    };
+  addGames = (gamesToAdd: Array<Game>) => {
+    const { games } = this.state;
+    games.addGames(gamesToAdd);
+    this.setState({ games });
   };
 
   // TODO: votes should be handled atomically
@@ -418,13 +266,10 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
       }
     } = this.props;
     const {
-      bggUser,
       games,
       bggUserModalOpen,
       loadingGames,
       initError,
-      fetchError,
-      fetchErrorUser,
       selectedFilters,
       filters,
       selectedNumPlayers,
@@ -437,7 +282,9 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
       allVetoes,
       allVotes,
       addingGamesProgress,
-      latestGameAdded
+      latestGameAdded,
+      showVotes,
+      introModalOpen
     } = this.state;
     const progressEl = loadingGames ? (
       <Progress
@@ -453,6 +300,10 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
     );
     return (
       <div>
+        <IntroModal
+          onClose={() => this.setState({ introModalOpen: false })}
+          isOpen={introModalOpen}
+        />
         <Sidebar.Pushable as={"div"}>
           <Sidebar
             as={Menu}
@@ -483,47 +334,18 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
               }
             >
               <Container className={styles.roomInfoContainer}>
-                {/* {filters.length ? (
-                  <Dropdown value={selectedFilters} text="Add filters...">
-                    <Dropdown.Menu>
-                      {filters.map(filter => {
-                        return (
-                          <Dropdown.Item
-                            onChange={() => this.toggleFilter(filter)}
-                            value={filter.id}
-                            label={filter.label}
-                          />
-                        );
-                      })}
-                    </Dropdown.Menu>
-                  </Dropdown>
-                ) : (
-                  ""
-                )} */}
-                {/* <Accordion>
-                  <Accordion.Title
-                    active={showMechanics}
-                    index={0}
-                    onClick={() =>
-                      this.setState({ showMechanics: !showMechanics })
-                    }
-                  >
-                    <Icon name="dropdown" />
-                    Mechanic Filters
-                  </Accordion.Title>
-                  <Accordion.Content active={showMechanics}>
-                    {filters.map(filter => {
-                      return (
-                        <Checkbox
-                          onChange={() => this.toggleFilter(filter)}
-                          checked={selectedFilters.indexOf(filter.id) > -1}
-                          label={filter.label}
-                        />
-                      );
-                    })}
-                  </Accordion.Content>
-                </Accordion> */}
-
+                <Input
+                  action={{
+                    color: "teal",
+                    labelPosition: "right",
+                    icon: "copy",
+                    content: "Copy",
+                    onClick: () =>
+                      copy(`https://${location.host}/rooms/${roomID}`)
+                  }}
+                  disabled
+                  defaultValue={`Room ID: ${roomID}`}
+                />
                 {initError && (
                   <Message negative>
                     <Message.Header>
@@ -532,47 +354,14 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
                     <p>{initError.message}</p>
                   </Message>
                 )}
-                <Modal
-                  open={bggUserModalOpen}
-                  onClose={this.toggleBggUserModal}
-                  className={styles.addUserModal}
-                >
-                  <Modal.Header>Add a BGG User</Modal.Header>
-                  <Modal.Content>
-                    <Modal.Description>
-                      <p>
-                        Enter the BoardGameGeek username of the collection that
-                        you would like to add.
-                      </p>
-                      <form onSubmit={this.getBggUser}>
-                        <Input
-                          name="bggUser"
-                          value={bggUser}
-                          onChange={this.onUpdateBggUser}
-                          action
-                        >
-                          <input />
-                          <Button
-                            loading={loadingGames}
-                            disabled={loadingGames}
-                            type="submit"
-                          >
-                            Get BGG User
-                          </Button>
-                        </Input>
-                        {fetchError && (
-                          <Message negative>
-                            <Message.Header>
-                              Failed to retrieve games for user {fetchErrorUser}
-                            </Message.Header>
-                            <p>{fetchError.message}</p>
-                          </Message>
-                        )}
-                      </form>
-                      {progressEl}
-                    </Modal.Description>
-                  </Modal.Content>
-                </Modal>
+                {bggUserModalOpen && (
+                  <AddUserModal
+                    addGames={this.addGames}
+                    onClose={() => this.setState({ bggUserModalOpen: false })}
+                    roomID={roomID}
+                    gamesInRoom={games}
+                  />
+                )}
                 {loadingGames && !bggUserModalOpen ? (
                   <Sticky context={this._mainContainer}>
                     <Segment className={""}>{progressEl}</Segment>
@@ -580,7 +369,7 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
                 ) : (
                   ""
                 )}
-                {games.toArray().length === 0 ? (
+                {!games.hasGames ? (
                   <Segment placeholder>
                     <Header icon>
                       There are no games listed in this room yet.
@@ -592,146 +381,159 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
                 ) : (
                   ""
                 )}
-                {games.toArray().length > 0 ? (
-                  <div className={styles.gameSection}>
-                    <div className={styles.actionRow}>
-                      {loadingGames ? (
-                        <Popup
-                          trigger={
-                            <Button disabled>Add BGG User Collection</Button>
-                          }
-                          content="Can only add one user at a time"
-                        />
-                      ) : (
-                        <Button
-                          onClick={this.toggleBggUserModal}
-                          primary
-                          disabled={loadingGames}
-                        >
-                          Add BGG User Collection
-                        </Button>
-                      )}
-                      <Dropdown
-                        text="Sort by..."
-                        value={sortBy}
-                        className={styles.sortByDropdown}
-                      >
-                        <Dropdown.Menu>
-                          <Dropdown.Item
-                            value={Sort.AlphaAsc}
-                            onClick={() =>
-                              this.setState({ sortBy: Sort.AlphaAsc })
-                            }
-                            text="Alphabetical"
-                            icon="caret up"
-                          />
-                          <Dropdown.Item
-                            value={Sort.AlphaDesc}
-                            onClick={() =>
-                              this.setState({ sortBy: Sort.AlphaDesc })
-                            }
-                            text="Alphabetical"
-                            icon="caret down"
-                          />
-                          <Dropdown.Item
-                            value={Sort.PlaytimeAsc}
-                            onClick={() =>
-                              this.setState({ sortBy: Sort.PlaytimeAsc })
-                            }
-                            text="Playtime"
-                            icon="caret up"
-                          />
-                          <Dropdown.Item
-                            value={Sort.PlaytimeDesc}
-                            onClick={() =>
-                              this.setState({ sortBy: Sort.PlaytimeDesc })
-                            }
-                            text="Playtime"
-                            icon="caret down"
-                          />
-                          <Dropdown.Item
-                            value={Sort.VotesDesc}
-                            onClick={() =>
-                              this.setState({ sortBy: Sort.VotesDesc })
-                            }
-                            text="Votes"
-                            icon="caret down"
-                          />
-                        </Dropdown.Menu>
-                      </Dropdown>
-                      <Dropdown
-                        className={styles.playerCountDropdown}
-                        placeholder="Player Count"
-                        text={
-                          selectedNumPlayers
-                            ? `${selectedNumPlayers} Players`
-                            : "Number of players"
+                {games.hasGames ? (
+                  <div className={styles.actionRow}>
+                    {loadingGames ? (
+                      <Popup
+                        trigger={
+                          <Button disabled>Add BGG User Collection</Button>
                         }
-                        clearable={!!selectedNumPlayers}
-                        selection
-                        options={[1, 2, 3, 4, 5, 6, 7].map(num => {
-                          return {
-                            text: num + " Players",
-                            value: num
-                          };
-                        })}
-                        value={selectedNumPlayers}
-                        onChange={this.onPlayerNumberChange}
+                        content="Can only add one user at a time"
                       />
-                    </div>
-                    <Grid
-                      className={styles.gameGrid}
-                      columns={6}
-                      doubling={true}
-                      verticalAlign="middle"
-                      relaxed
+                    ) : (
+                      <Button
+                        onClick={this.toggleBggUserModal}
+                        primary
+                        disabled={loadingGames}
+                      >
+                        Add BGG User Collection
+                      </Button>
+                    )}
+                    <Dropdown
+                      text="Sort by..."
+                      value={sortBy}
+                      className={styles.sortByDropdown}
                     >
-                      {games
-                        .toArray()
-                        .sort((a, b) => {
-                          function getPlaytime(game: Game) {
-                            return (
-                              (game.info.maxPlaytime + game.info.minPlaytime) /
-                              2
-                            );
+                      <Dropdown.Menu>
+                        <Dropdown.Item
+                          value={Sort.AlphaAsc}
+                          onClick={() =>
+                            this.setState({ sortBy: Sort.AlphaAsc })
                           }
-                          switch (sortBy) {
-                            default:
-                            case Sort.AlphaAsc:
-                              return a.name.localeCompare(b.name);
-                            case Sort.AlphaDesc:
-                              return -a.name.localeCompare(b.name);
-                            case Sort.PlaytimeAsc:
-                              return getPlaytime(a) - getPlaytime(b);
-                            case Sort.PlaytimeDesc:
-                              return -getPlaytime(a) + getPlaytime(b);
-                            case Sort.VotesDesc:
-                              return b.votes.length - a.votes.length;
+                          text="Alphabetical"
+                          icon="caret up"
+                        />
+                        <Dropdown.Item
+                          value={Sort.AlphaDesc}
+                          onClick={() =>
+                            this.setState({ sortBy: Sort.AlphaDesc })
                           }
-                        })
-                        .map(game => {
-                          const includesFilter =
-                            selectedFilters.some(
-                              filter =>
-                                !!game.info.tags &&
-                                game.info.tags.some(tag => tag.id === filter)
-                            ) || selectedFilters.length === 0;
-                          const inPlayerCount =
-                            (game.info.minPlayers <= selectedNumPlayers &&
-                              game.info.maxPlayers >= selectedNumPlayers) ||
-                            selectedNumPlayers === 0;
-                          if (includesFilter && inPlayerCount) {
-                            const isVote = votes.indexOf(game.name) > -1;
-                            const isVeto = vetoes.indexOf(game.name) > -1;
-                            return (
-                              <Grid.Column onClick={() => this.addVote(game)}>
-                                <div
-                                  className={styles.gameImage}
-                                  style={{
-                                    backgroundImage: `url('${game.thumbnail}')`
-                                  }}
-                                />
-                                {/* <Image
+                          text="Alphabetical"
+                          icon="caret down"
+                        />
+                        <Dropdown.Item
+                          value={Sort.PlaytimeAsc}
+                          onClick={() =>
+                            this.setState({ sortBy: Sort.PlaytimeAsc })
+                          }
+                          text="Playtime"
+                          icon="caret up"
+                        />
+                        <Dropdown.Item
+                          value={Sort.PlaytimeDesc}
+                          onClick={() =>
+                            this.setState({ sortBy: Sort.PlaytimeDesc })
+                          }
+                          text="Playtime"
+                          icon="caret down"
+                        />
+                        <Dropdown.Item
+                          value={Sort.VotesDesc}
+                          onClick={() =>
+                            this.setState({ sortBy: Sort.VotesDesc })
+                          }
+                          text="Votes"
+                          icon="caret down"
+                        />
+                      </Dropdown.Menu>
+                    </Dropdown>
+                    <Dropdown
+                      className={styles.playerCountDropdown}
+                      placeholder="Player Count"
+                      text={
+                        selectedNumPlayers
+                          ? `${selectedNumPlayers} Players`
+                          : "Number of players"
+                      }
+                      clearable={!!selectedNumPlayers}
+                      selection
+                      options={[1, 2, 3, 4, 5, 6, 7].map(num => {
+                        return {
+                          text: num + " Players",
+                          value: num
+                        };
+                      })}
+                      value={selectedNumPlayers}
+                      onChange={this.onPlayerNumberChange}
+                    />
+                  </div>
+                ) : (
+                  ""
+                )}
+                {games.hasGames ? (
+                  <div className={styles.actionRow}>
+                    <Checkbox
+                      label={`Show Other User's votes`}
+                      checked={showVotes}
+                      onChange={() => this.setState({ showVotes: !showVotes })}
+                    />
+                  </div>
+                ) : (
+                  ""
+                )}
+                {games.hasGames ? (
+                  <Grid
+                    className={styles.gameGrid}
+                    columns={6}
+                    doubling={true}
+                    verticalAlign="middle"
+                    padded
+                  >
+                    {games
+                      .toArray()
+                      .sort((a, b) => {
+                        function getPlaytime(game: Game) {
+                          return (
+                            (game.info.maxPlaytime + game.info.minPlaytime) / 2
+                          );
+                        }
+                        switch (sortBy) {
+                          default:
+                          case Sort.AlphaAsc:
+                            return a.name.localeCompare(b.name);
+                          case Sort.AlphaDesc:
+                            return -a.name.localeCompare(b.name);
+                          case Sort.PlaytimeAsc:
+                            return getPlaytime(a) - getPlaytime(b);
+                          case Sort.PlaytimeDesc:
+                            return -getPlaytime(a) + getPlaytime(b);
+                          case Sort.VotesDesc:
+                            return b.votes.length - a.votes.length;
+                        }
+                      })
+                      .map(game => {
+                        const includesFilter =
+                          selectedFilters.some(
+                            filter =>
+                              !!game.info.tags &&
+                              game.info.tags.some(tag => tag.id === filter)
+                          ) || selectedFilters.length === 0;
+                        const inPlayerCount =
+                          (game.info.minPlayers <= selectedNumPlayers &&
+                            game.info.maxPlayers >= selectedNumPlayers) ||
+                          selectedNumPlayers === 0;
+                        if (includesFilter && inPlayerCount) {
+                          const isVote = votes.indexOf(game.name) > -1;
+                          const isVeto = vetoes.indexOf(game.name) > -1;
+                          return (
+                            <Grid.Column onClick={() => this.addVote(game)}>
+                              <div
+                                className={styles.gameImage}
+                                style={{
+                                  backgroundImage: `url('${game.thumbnail}')`
+                                }}
+                              />
+                              {/* <Image
                                   className={styles.gameImage}
                                   inline
                                   rounded
@@ -739,51 +541,50 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
                                   src={game.thumbnail}
                                   centered
                                 /> */}
-                                <div
-                                  className={classnames(
-                                    styles.imageOverlay,
-                                    isVote
-                                      ? styles.green
-                                      : isVeto
-                                      ? styles.red
-                                      : undefined
-                                  )}
-                                />
-                                <Icon
-                                  className={styles.voteIcon}
-                                  size="big"
-                                  name={
-                                    isVeto
-                                      ? "remove circle"
-                                      : isVote
-                                      ? "check circle outline"
-                                      : "circle outline"
-                                  }
-                                  color={
-                                    isVote ? "green" : isVeto ? "red" : "black"
-                                  }
-                                />
-                                {game.votes.length ? (
-                                  <span className={styles.imageVoteOverlay}>
-                                    {game.votes.length}
-                                  </span>
-                                ) : (
-                                  ""
+                              <div
+                                className={classnames(
+                                  styles.imageOverlay,
+                                  isVote
+                                    ? styles.green
+                                    : isVeto
+                                    ? styles.red
+                                    : undefined
                                 )}
-                                {game.vetoes.length ? (
-                                  <span className={styles.imageVetoOverlay}>
-                                    {game.vetoes.length}
-                                  </span>
-                                ) : (
-                                  ""
-                                )}
-                              </Grid.Column>
-                            );
-                          }
-                          return false;
-                        })}
-                    </Grid>
-                  </div>
+                              />
+                              <Icon
+                                className={styles.voteIcon}
+                                size="big"
+                                name={
+                                  isVeto
+                                    ? "remove circle"
+                                    : isVote
+                                    ? "check circle outline"
+                                    : "circle outline"
+                                }
+                                color={
+                                  isVote ? "green" : isVeto ? "red" : "black"
+                                }
+                              />
+                              {game.votes.length && showVotes ? (
+                                <span className={styles.imageVoteOverlay}>
+                                  {game.votes.length}
+                                </span>
+                              ) : (
+                                ""
+                              )}
+                              {game.vetoes.length && showVotes ? (
+                                <span className={styles.imageVetoOverlay}>
+                                  {game.vetoes.length}
+                                </span>
+                              ) : (
+                                ""
+                              )}
+                            </Grid.Column>
+                          );
+                        }
+                        return false;
+                      })}
+                  </Grid>
                 ) : (
                   ""
                 )}

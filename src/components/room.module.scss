@@ -1,127 +1,107 @@
-@import './variables.scss';
+@import "./variables.scss";
 
-.roomInfoContainer{
-    // Space for fixed segment loading container
-    margin-top: 20px;
-    margin-bottom: 100px;
+.roomInfoContainer {
+  // Space for fixed segment loading container
+  margin-top: 20px;
+  margin-bottom: 100px;
 }
 
-.voteIcon{
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 100% !important;
-    text-align: center !important;
-    left: 0;
-    text-shadow: 0 0 10px black;
+.voteIcon {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 100% !important;
+  text-align: center !important;
+  left: 0;
+  text-shadow: 0 0 10px black;
 }
-
-// %imageOverlay {
-//     position: absolute;
-//     bottom: 5px;
-//     height: 30px;
-//     width: 30px;
-//     line-height: 30px;
-//     border-radius: 50%;
-//     color: $white;
-//     text-align: center;
-//     font-weight: bold;
-//     box-shadow: 1px 1px 5px rgba(0,0,0, .3);
-// }
-
-// .imageVoteOverlay {
-//     @extend %imageOverlay;
-//     background-color: $green;
-//     left: 10px;
-// }
-
-// .imageVetoOverlay {
-//     @extend %imageOverlay;
-//     background-color: $red;
-//     right: 55px;
-// }
 
 %imageOverlay {
-    position: absolute;
-    left: 0;
-    height: 30px;
-    width: 30px;
-    line-height: 15px;
-    color: $white;
-    font-weight: bold;
-    border-radius: 0;
-    text-align: center;
-    line-height: 30px;
-    font-size: 16px;
+  position: absolute;
+  left: 0;
+  height: 30px;
+  width: 30px;
+  line-height: 15px;
+  color: $white;
+  font-weight: bold;
+  border-radius: 0;
+  text-align: center;
+  line-height: 30px;
+  font-size: 16px;
 }
 $bgTransparency: 0.9;
 .imageVoteOverlay {
-
-    @extend %imageOverlay;
-    border: 0;
-    background-color: rgba($green, $bgTransparency);
-    top: 0;
+  @extend %imageOverlay;
+  border: 0;
+  background-color: rgba($green, $bgTransparency);
+  top: 0;
 }
 
 .imageVetoOverlay {
-    @extend %imageOverlay;
-    border: 0;
-    background-color: rgba($red, $bgTransparency);
-    bottom: 0;
+  @extend %imageOverlay;
+  border: 0;
+  background-color: rgba($red, $bgTransparency);
+  bottom: 0;
 }
 
-.loadingGamesSegment{
-    //TODO: how to css module override other settings?
-    position:fixed !important;
-    bottom: 10px;
+.loadingGamesSegment {
+  //TODO: how to css module override other settings?
+  position: fixed !important;
+  bottom: 10px;
 }
 
-.addUserModal .progress {
-    margin-top: 20px !important;
-}
-
-.sortByDropdown{
-    float: right;
-    // Height from semantic-ui
-    min-height: 2.71428571em;
-    line-height: 2.71428571em;
+.sortByDropdown {
+  float: right;
+  // Height from semantic-ui
+  min-height: 2.71428571em;
+  line-height: 2.71428571em;
 }
 
 .playerCountDropdown {
-    float: right;
-    margin-right: 20px;
+  float: right;
+  margin-right: 20px;
+  @media (max-width: 723px) {
+    float: left;
+    margin: 10px 0 0 0;
+  }
 }
 
 .actionRow {
-    margin: 20px 0;
+  margin: 20px 0;
+  width: 100%;
+  &:after {
+    display: table;
+    content: " ";
+    clear: both;
+  }
 }
 
 .gameSection {
-    width: 100%;
+  width: 100%;
 }
 
 .gameGrid {
-    width:100%;
+  width: 100%;
 }
 
 .imageOverlay {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    right: 0;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
 }
 .red {
-    background-color: rgba(darken($red, 10), .2);
+  background-color: rgba(darken($red, 10), 0.2);
 }
 .green {
-    background-color: rgba(darken($green, 10), .2);
+  background-color: rgba(darken($green, 10), 0.2);
 }
 
-.gameImage{
-    background-position:top center;
-    background-repeat: no-repeat;
-    margin: 0 auto;
-    padding-top: 100%;
-    width: 100%;
+.gameImage {
+  background-position: top center;
+  background-repeat: no-repeat;
+  margin: 0 auto;
+  padding-top: 100%;
+  width: 100%;
 }
