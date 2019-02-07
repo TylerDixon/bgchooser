@@ -11,7 +11,12 @@ export class GameCollection {
     this.hasGames = true;
     games.forEach(game => {
       if (!this.games[game.name]) {
-        this.games[game.name] = new Game(game.thumbnail, game.name, game.info);
+        this.games[game.name] = new Game(
+          game.id,
+          game.thumbnail,
+          game.name,
+          game.info
+        );
       }
     });
   }
@@ -19,19 +24,30 @@ export class GameCollection {
   toArray(): Array<Game> {
     return Object.keys(this.games).map(key => this.games[key]);
   }
+
+  resetVotes() {
+    this.toArray().forEach(game => game.resetVotes());
+  }
 }
 
 export class Game {
   public thumbnail: string;
+  public id: string;
   public name: string;
   public info: GameInfo;
   public votes: Array<string> = [];
   public vetoes: Array<string> = [];
 
-  constructor(thumbnail: string, name: string, info: GameInfo) {
+  constructor(id: string, thumbnail: string, name: string, info: GameInfo) {
     this.thumbnail = thumbnail;
     this.name = name;
     this.info = info;
+    this.id = id;
+  }
+
+  resetVotes() {
+    this.votes = [];
+    this.vetoes = [];
   }
 
   addVote(user: string) {
@@ -96,7 +112,8 @@ export interface SubscriptionMessage {
 
 export enum UpdateType {
   UpdateTypeAddedGames = "addedGamesUpdate",
-  UpdateTypeAddedVotes = "addedVotesUpdate"
+  UpdateTypeAddedVotes = "addedVotesUpdate",
+  UpdateTypeResetVotes = "resetVotesUpdate"
 }
 
 export interface GameInfo {
@@ -114,6 +131,10 @@ export interface Tag {
 
 export interface BggUserInfo {
   games: Array<Game>;
+}
+
+export interface AddGameRes {
+  game: Game;
 }
 
 export interface AddGamesMessage {

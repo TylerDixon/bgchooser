@@ -13,6 +13,7 @@ import styles from "./addusermodal.module.scss";
 interface AddUserModalProps {
   addGames: (games: Array<Game>) => void;
   onClose: () => void;
+  switchGameModal: () => void;
   gamesInRoom: GameCollection;
   roomID: string;
 }
@@ -143,7 +144,7 @@ class AddUserModal extends React.Component<
   unselectAllGames = () => this.setState({ gamesToAdd: [] });
 
   render() {
-    const { onClose } = this.props;
+    const { onClose, switchGameModal } = this.props;
     const {
       bggUser,
       fetchError,
@@ -156,15 +157,22 @@ class AddUserModal extends React.Component<
       fetchInfo
     } = this.state;
     return (
-      <Modal open onClose={onClose} closeIcon className={styles.addUserModal}>
+      <Modal
+        open
+        onClose={onClose}
+        closeIcon
+        className={styles.addUserModal}
+        centered={false}
+      >
         <Modal.Header>Add a BGG User</Modal.Header>
         <Modal.Content scrolling>
-          <Modal.Description>
+          <Modal.Description className={styles.modalBody}>
             {allGames.length == 0 && (
               <form onSubmit={this.getBggUser}>
                 <p>
                   Enter the BoardGameGeek username of the collection that you
-                  would like to add.
+                  would like to add. You will be able to choose which games in
+                  the collection you want to add to the vote.
                 </p>
                 <Input
                   name="bggUser"
@@ -185,6 +193,9 @@ class AddUserModal extends React.Component<
                     <p>{fetchError.message}</p>
                   </Message>
                 )}
+                <a onClick={switchGameModal} className={styles.switchModalLink}>
+                  Add a single game instead
+                </a>
               </form>
             )}
             {allGames.length > 0 && (

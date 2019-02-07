@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
-	"log"
 	"strings"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/go-redis/redis"
 	"github.com/tylerdixon/bgchooser/bggclient"
 )
@@ -18,6 +18,7 @@ type UpdateType string
 const (
 	UpdateTypeAddedGames UpdateType = "addedGamesUpdate"
 	UpdateTypeAddedVotes            = "addedVotesUpdate"
+	UpdateTypeResetVotes            = "resetVotesUpdate"
 )
 
 type Storage struct {
@@ -62,7 +63,17 @@ func New() (Storage, error) {
 // }
 
 func (s *Storage) AddGamesToRoom(roomID, bggUser string, games []bggclient.Game) error {
-	gamesToStore, err := json.Marshal(games)
+	getGamesCmd := s.redisClient.HGet("games:"+roomID, bggUser)
+	getGamesRes, err := getGamesCmd.Result()
+	if err != nil && err != redis.Nil {
+		return err
+	}
+	var currentGames []bggclient.Game
+	err = json.Unmarshal([]byte(getGamesRes), &currentGames)
+	for _, game := range games {
+		currentGames = append(currentGames, game)
+	}
+	gamesToStore, err := json.Marshal(currentGames)
 	if err != nil {
 		return err
 	}
@@ -71,7 +82,8 @@ func (s *Storage) AddGamesToRoom(roomID, bggUser string, games []bggclient.Game)
 	if err != nil {
 		return err
 	}
-	pubCmd := s.redisClient.Publish(roomID, string(UpdateTypeAddedGames)+"::"+bggUser+"::"+string(gamesToStore))
+	// TODO: Maybe should only log error on publish fail?
+	pubCmd := s.redisClient.Publish("room:"+roomID, string(UpdateTypeAddedGames)+"::"+bggUser+"::"+string(gamesToStore))
 	return pubCmd.Err()
 }
 
@@ -147,6 +159,23 @@ func (s *Storage) GetUserVotes(roomID string) (VoteResult, error) {
 	return voteRes, nil
 }
 
+func (s *Storage) ResetRoomVotes(roomID string) error {
+	cmd := s.redisClient.HKeys("rooms:" + roomID)
+	res, err := cmd.Result()
+	if err != nil {
+		return err
+	}
+
+	delCmd := s.redisClient.HDel("rooms:"+roomID, res...)
+	err = delCmd.Err()
+	if err != nil {
+		return err
+	}
+
+	pubCmd := s.redisClient.Publish("room:"+roomID, UpdateTypeResetVotes)
+	return pubCmd.Err()
+}
+
 type RoomSubscriptionMessage struct {
 	Type   UpdateType       `json:"type"`
 	Games  []bggclient.Game `json:"games"`
@@ -194,6 +223,10 @@ func (s *Storage) SubscribeToRoomInfo(roomID string, watchFn func(RoomSubscripti
 					User:   parts[1],
 					Votes:  strings.Split(parts[2], itemSep),
 					Vetoes: strings.Split(parts[3], itemSep),
+				})
+			case UpdateTypeResetVotes:
+				watchFn(RoomSubscriptionMessage{
+					Type: UpdateType(parts[0]),
 				})
 			}
 		}

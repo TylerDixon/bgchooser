@@ -98,7 +98,7 @@ func New() API {
 		// TODO: error if bad msg
 		roomID := strings.Split(string(message), ":")[1]
 		close := api.Storage.SubscribeToRoomInfo(roomID, func(msg storage.RoomSubscriptionMessage) {
-			// TODO: return stuff
+			log.Info(log.Fields{"roomID": roomID, "msgType": msg.Type}, "Socket event sent")
 			returnMsg, err := json.Marshal(msg)
 			if err != nil {
 				log.Println("Failed to marshal games to emit to user: " + err.Error())
@@ -138,6 +138,12 @@ func New() API {
 			}
 
 			entry = entry.WithField("remoteAddr", r.RemoteAddr)
+			if ff := r.Header.Get("X-Forwarded-For"); ff != "" {
+				entry = entry.WithField("remoteAddr", ff)
+			}
+			if rip := r.Header.Get("X-Real-IP"); rip != "" {
+				entry = entry.WithField("remoteAddr", net.ParseIP(rip).String())
+			}
 
 			lw := newLoggingResponseWriter(w)
 			h.ServeHTTP(lw, r)
@@ -168,7 +174,9 @@ func New() API {
 	api.Router.HandleFunc("/rooms/{roomID}", api.GetRoomInfo).Methods("GET")
 	api.Router.HandleFunc("/rooms/{roomID}/bgguser/{bggUserID}", api.GetBggUser).Methods("GET")
 	api.Router.HandleFunc("/rooms/{roomID}/bgguser/{bggUserID}", api.AddBggUser).Methods("POST")
+	api.Router.HandleFunc("/rooms/{roomID}/vote/reset", api.ResetVotes).Methods("POST")
 	api.Router.HandleFunc("/rooms/{roomID}/vote/{userID}", api.AddVotesToRoom).Methods("POST")
+	api.Router.HandleFunc("/rooms/{roomID}/games/{userID}/{gameID}", api.AddGame).Methods("POST")
 	api.Router.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "./build/index.html")
 	})
@@ -185,7 +193,7 @@ type NewRoomRes struct {
 }
 
 func NewRoom(w http.ResponseWriter, r *http.Request) {
-	id := fmt.Sprintf("%05d", rand.Intn(99999))
+	id := fmt.Sprintf("%05d", rand.Intn(89999)+10000)
 	res := NewRoomRes{
 		RoomID: id,
 	}
@@ -368,6 +376,57 @@ func (a *API) AddVotesToRoom(w http.ResponseWriter, r *http.Request) {
 	// TODO: notify users of new votes
 }
 
+func (a *API) ResetVotes(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	roomID := vars["roomID"]
+	err := a.Storage.ResetRoomVotes(roomID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("failed to reset votes in storage: " + err.Error()))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+type AddGameRes struct {
+	Game bggclient.Game `json:"game"`
+}
+
+func (a *API) AddGame(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	roomID := vars["roomID"]
+	gameID := vars["gameID"]
+	userID := vars["userID"]
+
+	game, err := bggclient.GetGameInfo(gameID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Failed to get game info from BGG: " + err.Error()))
+		return
+	}
+
+	err = a.Storage.AddGamesToRoom(roomID, userID, []bggclient.Game{game})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("failed to add game to room: " + err.Error()))
+		return
+	}
+
+	resBody, err := json.Marshal(AddGameRes{game})
+	if err != nil {
+		log.Error(log.Fields{
+			"roomID": roomID,
+		}, err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("failed to marshal response for adding game to room: " + err.Error()))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(resBody)
+}
+
 func (api *API) newSocketServer() (*socketio.Server, error) {
 	server, err := socketio.NewServer(nil)
 	if err != nil {
@@ -377,19 +436,14 @@ func (api *API) newSocketServer() (*socketio.Server, error) {
 		fmt.Println("connected:", s.ID())
 		return nil
 	})
-	server.OnEvent("/", "register", func(s socketio.Conn, msg string) {
-		log.Println(msg)
-		log.Println("asdfasdf")
+	server.OnEvent("/", "register", func(s socketio.Conn, roomID string) {
 		var ctx ConnectionContext
-		ctx.Close = api.Storage.SubscribeToRoomInfo(msg, func(msg storage.RoomSubscriptionMessage) {
-			log.Println(msg)
-			log.Println("asdfasdf2")
-			// TODO: return stuff
+		ctx.Close = api.Storage.SubscribeToRoomInfo(roomID, func(msg storage.RoomSubscriptionMessage) {
+			log.Info(log.Fields{"roomID": roomID, "msgType": msg.Type}, "Socket event sent")
 			gamesToEmit, err := json.Marshal(msg.Games)
 			if err != nil {
-				log.Println("Failed to marshal games to emit to user: " + err.Error())
+				log.WithError(err).Error("Failed to marshal games to emit to user")
 			}
-			log.Println(string(msg.Type))
 			s.Emit(string(msg.Type), msg.User, gamesToEmit)
 		})
 		s.SetContext(ctx)

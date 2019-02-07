@@ -22,7 +22,9 @@ import {
   Sidebar,
   Header,
   Popup,
-  DropdownProps
+  DropdownProps,
+  Card,
+  CardGroup
 } from "semantic-ui-react";
 import _ from "lodash";
 import { withRouter } from "react-router-dom";
@@ -44,6 +46,7 @@ import {
   UpdateType
 } from "../types/game";
 import AddUserModal from "./AddUserModal";
+import WriteInModal from "./WriteInModal";
 
 // const client = io("http://localhost:8000")
 
@@ -59,6 +62,7 @@ interface RoomState {
   bggUser: string;
   games: GameCollection;
   bggUserModalOpen: boolean;
+  writeInModalOpen: boolean;
   loadingGames: boolean;
   fetchError?: Error;
   initError?: Error;
@@ -81,6 +85,7 @@ interface RoomState {
   latestGameAdded: string;
   showVotes: boolean;
   introModalOpen: boolean;
+  showGameInfo: boolean;
 }
 
 interface RoomRouteParams {
@@ -92,6 +97,7 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
     bggUser: "",
     games: new GameCollection(),
     bggUserModalOpen: false,
+    writeInModalOpen: false,
     loadingGames: false,
     fetchErrorUser: "",
     filters: [],
@@ -110,13 +116,14 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
     addingGamesProgress: 0,
     latestGameAdded: "",
     showVotes: false,
-    introModalOpen: false
+    introModalOpen: false,
+    showGameInfo: false
   };
 
   //TODO: Better way to handle? (don't need state)
   private _mainContainer = React.createRef<HTMLDivElement>();
 
-  socket: WebSocket = new WebSocket(`wss://${location.host}/api/echo`);
+  socket: WebSocket = new WebSocket(`ws://${location.host}/api/echo`);
 
   componentDidMount = () => {
     const { roomID } = this.props.match.params;
@@ -185,7 +192,11 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
           .forEach(game => game.handleUser(data.user, data.votes, data.vetoes));
       } else if (data.type === UpdateType.UpdateTypeAddedGames) {
         this.state.games.addGames(data.games);
+      } else if (data.type === UpdateType.UpdateTypeResetVotes) {
+        this.state.games.resetVotes();
+        this.setState({ votes: [], vetoes: [] });
       }
+
       this.setState({ games: this.state.games });
       this.forceUpdate();
     };
@@ -216,22 +227,35 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
   };
 
   // TODO: votes should be handled atomically
-  addVote = (game: Game) => {
+  addVote = (game: Game, isVote: boolean) => {
     const { roomID } = this.props.match.params;
     const { userID, votes, vetoes } = this.state;
     let newVotes = [...votes];
     let newVetoes = [...vetoes];
-    if (newVotes.indexOf(game.name) > -1) {
-      newVotes.splice(newVotes.indexOf(game.name), 1);
-      newVetoes.push(game.name);
-      game.removeVote(userID);
-      game.addVeto(userID);
-    } else if (newVetoes.indexOf(game.name) > -1) {
-      newVetoes.splice(newVetoes.indexOf(game.name), 1);
-      game.removeVeto(userID);
+    if (isVote) {
+      if (vetoes.indexOf(game.name) > -1) {
+        game.removeVeto(userID);
+        newVetoes.splice(newVetoes.indexOf(game.name), 1);
+      }
+      if (votes.indexOf(game.name) > -1) {
+        game.removeVote(userID);
+        newVotes.splice(newVotes.indexOf(game.name), 1);
+      } else {
+        newVotes.push(game.name);
+        game.addVote(userID);
+      }
     } else {
-      game.addVote(userID);
-      newVotes.push(game.name);
+      if (votes.indexOf(game.name) > -1) {
+        game.removeVote(userID);
+        newVotes.splice(newVotes.indexOf(game.name), 1);
+      }
+      if (vetoes.indexOf(game.name) > -1) {
+        game.removeVeto(userID);
+        newVetoes.splice(newVetoes.indexOf(game.name), 1);
+      } else {
+        newVetoes.push(game.name);
+        game.addVeto(userID);
+      }
     }
     this.setState({ savingVotes: true, votes: newVotes, vetoes: newVetoes });
     fetch(`/api/rooms/${roomID}/vote/${userID}`, {
@@ -240,6 +264,18 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
         votes: newVotes,
         vetoes: newVetoes
       })
+    })
+      .then(() => this.setState({ savingVotes: false }))
+      .catch((err: Error) => {
+        this.setState({ votesError: err, savingVotes: false });
+      });
+  };
+
+  resetVotes = () => {
+    const { roomID } = this.props.match.params;
+    this.setState({ savingVotes: true });
+    fetch(`/api/rooms/${roomID}/vote/reset`, {
+      method: "POST"
     })
       .then(() => this.setState({ savingVotes: false }))
       .catch((err: Error) => {
@@ -257,6 +293,13 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
       return;
     }
     this.setState({ selectedFilters: selectedFilters.concat(filter.id) });
+  };
+
+  switchGameModal = () => {
+    this.setState({
+      bggUserModalOpen: !this.state.bggUserModalOpen,
+      writeInModalOpen: !this.state.writeInModalOpen
+    });
   };
 
   render() {
@@ -284,7 +327,10 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
       addingGamesProgress,
       latestGameAdded,
       showVotes,
-      introModalOpen
+      introModalOpen,
+      writeInModalOpen,
+      showGameInfo,
+      userID
     } = this.state;
     const progressEl = loadingGames ? (
       <Progress
@@ -334,18 +380,30 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
               }
             >
               <Container className={styles.roomInfoContainer}>
-                <Input
-                  action={{
-                    color: "teal",
-                    labelPosition: "right",
-                    icon: "copy",
-                    content: "Copy",
-                    onClick: () =>
-                      copy(`https://${location.host}/rooms/${roomID}`)
-                  }}
-                  disabled
-                  defaultValue={`Room ID: ${roomID}`}
-                />
+                <Dropdown text="Menu">
+                  <Dropdown.Menu>
+                    <Dropdown.Item
+                      text="Copy Room URL"
+                      onClick={() =>
+                        copy(`https://${location.host}/rooms/${roomID}`)
+                      }
+                    />
+                    <Dropdown.Item
+                      text="Reset Votes"
+                      onClick={this.resetVotes}
+                    />
+                    <Dropdown.Item
+                      text={showGameInfo ? "Hide Game Info" : "Show Game Info"}
+                      onClick={() =>
+                        this.setState({ showGameInfo: !showGameInfo })
+                      }
+                    />
+                    <Dropdown.Item
+                      text="Add Game Without BGG Collection"
+                      onClick={() => this.setState({ writeInModalOpen: true })}
+                    />
+                  </Dropdown.Menu>
+                </Dropdown>
                 {initError && (
                   <Message negative>
                     <Message.Header>
@@ -356,10 +414,21 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
                 )}
                 {bggUserModalOpen && (
                   <AddUserModal
+                    switchGameModal={this.switchGameModal}
                     addGames={this.addGames}
                     onClose={() => this.setState({ bggUserModalOpen: false })}
                     roomID={roomID}
                     gamesInRoom={games}
+                  />
+                )}
+                {writeInModalOpen && (
+                  <WriteInModal
+                    switchGameModal={this.switchGameModal}
+                    addGames={this.addGames}
+                    onClose={() => this.setState({ writeInModalOpen: false })}
+                    roomID={roomID}
+                    gamesInRoom={games}
+                    userID={userID}
                   />
                 )}
                 {loadingGames && !bggUserModalOpen ? (
@@ -404,7 +473,7 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
                       value={sortBy}
                       className={styles.sortByDropdown}
                     >
-                      <Dropdown.Menu>
+                      <Dropdown.Menu direction="left">
                         <Dropdown.Item
                           value={Sort.AlphaAsc}
                           onClick={() =>
@@ -473,7 +542,7 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
                 {games.hasGames ? (
                   <div className={styles.actionRow}>
                     <Checkbox
-                      label={`Show Other User's votes`}
+                      label={`Show All User Votes`}
                       checked={showVotes}
                       onChange={() => this.setState({ showVotes: !showVotes })}
                     />
@@ -482,11 +551,11 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
                   ""
                 )}
                 {games.hasGames ? (
-                  <Grid
+                  <CardGroup
                     className={styles.gameGrid}
-                    columns={6}
                     doubling={true}
                     verticalAlign="middle"
+                    itemsPerRow={4}
                     padded
                   >
                     {games
@@ -526,65 +595,137 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
                           const isVote = votes.indexOf(game.name) > -1;
                           const isVeto = vetoes.indexOf(game.name) > -1;
                           return (
-                            <Grid.Column onClick={() => this.addVote(game)}>
-                              <div
-                                className={styles.gameImage}
-                                style={{
-                                  backgroundImage: `url('${game.thumbnail}')`
-                                }}
-                              />
-                              {/* <Image
-                                  className={styles.gameImage}
-                                  inline
-                                  rounded
-                                  size="small"
-                                  src={game.thumbnail}
-                                  centered
-                                /> */}
-                              <div
-                                className={classnames(
-                                  styles.imageOverlay,
-                                  isVote
-                                    ? styles.green
-                                    : isVeto
-                                    ? styles.red
-                                    : undefined
+                            <Card>
+                              <Card.Content>
+                                <a
+                                  target="_blank"
+                                  href={`https://boardgamegeek.com/boardgame/${
+                                    game.id
+                                  }`}
+                                >
+                                  <Image
+                                    floated="left"
+                                    size="tiny"
+                                    src={game.thumbnail}
+                                  />
+                                </a>
+                                <Card.Header as="p">
+                                  <a
+                                    target="_blank"
+                                    href={`https://boardgamegeek.com/boardgame/${
+                                      game.id
+                                    }`}
+                                  >
+                                    {game.name}
+                                  </a>
+                                </Card.Header>
+                                {showGameInfo && (
+                                  <Card.Description>
+                                    <p>
+                                      <Icon name="user" />{" "}
+                                      {game.info.maxPlayers ===
+                                      game.info.minPlayers
+                                        ? game.info.minPlayers
+                                        : `${game.info.minPlayers} - ${
+                                            game.info.maxPlayers
+                                          }`}
+                                    </p>
+                                    <p>
+                                      <Icon name="clock" />
+                                      {game.info.maxPlaytime ===
+                                      game.info.minPlaytime
+                                        ? game.info.minPlaytime
+                                        : `${game.info.minPlaytime} - ${
+                                            game.info.maxPlaytime
+                                          }`}
+                                    </p>
+                                  </Card.Description>
                                 )}
-                              />
-                              <Icon
-                                className={styles.voteIcon}
-                                size="big"
-                                name={
-                                  isVeto
-                                    ? "remove circle"
-                                    : isVote
-                                    ? "check circle outline"
-                                    : "circle outline"
-                                }
-                                color={
-                                  isVote ? "green" : isVeto ? "red" : "black"
-                                }
-                              />
-                              {game.votes.length && showVotes ? (
-                                <span className={styles.imageVoteOverlay}>
-                                  {game.votes.length}
-                                </span>
-                              ) : (
-                                ""
-                              )}
-                              {game.vetoes.length && showVotes ? (
-                                <span className={styles.imageVetoOverlay}>
-                                  {game.vetoes.length}
-                                </span>
-                              ) : (
-                                ""
-                              )}
-                            </Grid.Column>
+                              </Card.Content>
+                              <Card.Content extra>
+                                <Button.Group floated="right">
+                                  <Button
+                                    basic={!isVote}
+                                    color="green"
+                                    icon="arrow up"
+                                    size="small"
+                                    content={
+                                      showVotes ? game.votes.length : undefined
+                                    }
+                                    onClick={() => this.addVote(game, true)}
+                                  />
+                                  <Button
+                                    basic={!isVeto}
+                                    color="red"
+                                    icon="arrow down"
+                                    size="small"
+                                    content={
+                                      showVotes ? game.vetoes.length : undefined
+                                    }
+                                    onClick={() => this.addVote(game, false)}
+                                  />
+                                </Button.Group>
+                              </Card.Content>
+                            </Card>
+                            // <Grid.Column onClick={() => this.addVote(game)}>
+                            //   <div
+                            //     className={styles.gameImage}
+                            //     style={{
+                            //       backgroundImage: `url('${game.thumbnail}')`
+                            //     }}
+                            //   />
+                            //   {/* <Image
+                            //       className={styles.gameImage}
+                            //       inline
+                            //       rounded
+                            //       size="small"
+                            //       src={game.thumbnail}
+                            //       centered
+                            //     /> */}
+                            //   <div
+                            //     className={classnames(
+                            //       styles.imageOverlay,
+                            //       isVote
+                            //         ? styles.green
+                            //         : isVeto
+                            //         ? styles.red
+                            //         : undefined
+                            //     )}
+                            //   />
+                            //   <Icon
+                            //     className={styles.voteIcon}
+                            //     size="big"
+                            //     name={
+                            //       isVeto
+                            //         ? "remove circle"
+                            //         : isVote
+                            //         ? "check circle outline"
+                            //         : "circle outline"
+                            //     }
+                            //     color={
+                            //       isVote ? "green" : isVeto ? "red" : "black"
+                            //     }
+                            //   />
+                            //   {game.votes.length && showVotes ? (
+                            //     <span className={styles.imageVoteOverlay}>
+                            //       {game.votes.length}
+                            //     </span>
+                            //   ) : (
+                            //     ""
+                            //   )}
+                            //   {game.vetoes.length && showVotes ? (
+                            //     <span className={styles.imageVetoOverlay}>
+                            //       {game.vetoes.length}
+                            //     </span>
+                            //   ) : (
+                            //     ""
+                            //   )}
+                            // </Grid.Column>
                           );
                         }
                         return false;
                       })}
-                  </Grid>
+                  </CardGroup>
                 ) : (
                   ""
                 )}

@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -29,22 +30,81 @@ type GameInfo struct {
 	MaxPlaytime int `xml:"maxplaytime,attr" json:"maxPlaytime"`
 }
 
-type parsedGameInfo struct {
-	MinPlayers  entryWithValue `xml:"item>minplayers"`
-	MaxPlayers  entryWithValue `xml:"item>maxplayers"`
-	MinPlaytime entryWithValue `xml:"item>minplaytime"`
-	MaxPlaytime entryWithValue `xml:"item>maxplaytime"`
-	Tags        []Tag          `xml:"item>link"`
-}
-
-type entryWithValue struct {
-	Value int `xml:"value,attr"`
-}
-
 type Tag struct {
 	ID    string `xml:"id,attr" json:"id"`
 	Type  string `xml:"type,attr" json:"-"`
 	Label string `xml:"value,attr" json:"label"`
+}
+
+type getGameRes struct {
+	Items []singleGame `xml:"item"`
+}
+
+type singleGame struct {
+	ID          string      `xml:"id,attr" json:"id"`
+	Thumbnail   string      `xml:"thumbnail" json:"thumbnail"`
+	Name        []valueAttr `xml:"name" json:"name"`
+	MinPlayers  valueAttr   `xml:"minplayers" json:"minPlayers"`
+	MaxPlayers  valueAttr   `xml:"maxplayers" json:"maxPlayers"`
+	MinPlaytime valueAttr   `xml:"minplaytime" json:"minPlaytime"`
+	MaxPlaytime valueAttr   `xml:"maxplaytime" json:"maxPlaytime"`
+}
+
+type valueAttr struct {
+	Value string `xml:"value,attr"`
+	Type  string `xml:"type,attr"`
+}
+
+func GetGameInfo(gameID string) (Game, error) {
+	reqString := "https://boardgamegeek.com/xmlapi2/thing?type=boardgame&id=" + url.QueryEscape(gameID)
+	res, err := http.Get(reqString)
+	if err != nil {
+		return Game{}, err
+	}
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return Game{}, err
+	}
+
+	var gameRes getGameRes
+	err = xml.Unmarshal(body, &gameRes)
+	if len(gameRes.Items) == 0 {
+		return Game{}, errors.New("Failed to find game of ID: " + gameID)
+	}
+	game := Game{
+		ID:        gameRes.Items[0].ID,
+		Thumbnail: gameRes.Items[0].Thumbnail,
+		Info:      GameInfo{},
+	}
+
+	i, err := strconv.Atoi(gameRes.Items[0].MaxPlayers.Value)
+	if err == nil {
+		game.Info.MaxPlayers = i
+	}
+
+	i, err = strconv.Atoi(gameRes.Items[0].MinPlayers.Value)
+	if err == nil {
+		game.Info.MinPlayers = i
+	}
+
+	i, err = strconv.Atoi(gameRes.Items[0].MaxPlaytime.Value)
+	if err == nil {
+		game.Info.MaxPlaytime = i
+	}
+
+	i, err = strconv.Atoi(gameRes.Items[0].MinPlaytime.Value)
+	if err == nil {
+		game.Info.MinPlaytime = i
+	}
+
+	for _, name := range gameRes.Items[0].Name {
+		if name.Type == "primary" {
+			game.Name = name.Value
+		}
+	}
+
+	return game, err
+
 }
 
 func GetUserCollection(userID string, currentGames []Game) ([]Game, error) {
@@ -125,37 +185,37 @@ func GetUserCollection(userID string, currentGames []Game) ([]Game, error) {
 	// return collRes.Games, infoErr
 }
 
-func (game *Game) getGameInfo() error {
-	res, err := http.Get("https://boardgamegeek.com/xmlapi2/thing?id=" + url.QueryEscape(game.ID))
-	if err != nil {
-		return err
-	} else if res.StatusCode != 200 {
-		body, err := ioutil.ReadAll(res.Body)
-		if err != nil {
-			return err
-		}
-		return errors.New("non-200 received from bgg: " + string(body))
-	}
+// func (game *Game) getGameInfo() error {
+// 	res, err := http.Get("https://boardgamegeek.com/xmlapi2/thing?id=" + url.QueryEscape(game.ID))
+// 	if err != nil {
+// 		return err
+// 	} else if res.StatusCode != 200 {
+// 		body, err := ioutil.ReadAll(res.Body)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		return errors.New("non-200 received from bgg: " + string(body))
+// 	}
 
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return err
-	}
+// 	body, err := ioutil.ReadAll(res.Body)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	var gameInfo parsedGameInfo
-	err = xml.Unmarshal(body, &gameInfo)
+// 	var gameInfo parsedGameInfo
+// 	err = xml.Unmarshal(body, &gameInfo)
 
-	var tagsToKeep []Tag
+// 	var tagsToKeep []Tag
 
-	for _, tag := range gameInfo.Tags {
-		if tag.Type == "boardgamemechanic" || tag.Type == "boardgamecategory" {
-			tagsToKeep = append(tagsToKeep, tag)
-		}
-	}
-	game.Info.MaxPlayers = gameInfo.MaxPlayers.Value
-	game.Info.MinPlayers = gameInfo.MinPlayers.Value
-	game.Info.MaxPlaytime = gameInfo.MaxPlaytime.Value
-	game.Info.MinPlaytime = gameInfo.MinPlaytime.Value
+// 	for _, tag := range gameInfo.Tags {
+// 		if tag.Type == "boardgamemechanic" || tag.Type == "boardgamecategory" {
+// 			tagsToKeep = append(tagsToKeep, tag)
+// 		}
+// 	}
+// 	game.Info.MaxPlayers = gameInfo.MaxPlayers.Value
+// 	game.Info.MinPlayers = gameInfo.MinPlayers.Value
+// 	game.Info.MaxPlaytime = gameInfo.MaxPlaytime.Value
+// 	game.Info.MinPlaytime = gameInfo.MinPlaytime.Value
 
-	return err
-}
+// 	return err
+// }
