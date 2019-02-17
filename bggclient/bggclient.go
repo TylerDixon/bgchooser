@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
+
 	"github.com/pkg/errors"
 )
 
@@ -28,12 +30,6 @@ type GameInfo struct {
 	MaxPlayers  int `xml:"maxplayers,attr" json:"maxPlayers"`
 	MinPlaytime int `xml:"minplaytime,attr" json:"minPlaytime"`
 	MaxPlaytime int `xml:"maxplaytime,attr" json:"maxPlaytime"`
-}
-
-type Tag struct {
-	ID    string `xml:"id,attr" json:"id"`
-	Type  string `xml:"type,attr" json:"-"`
-	Label string `xml:"value,attr" json:"label"`
 }
 
 type getGameRes struct {
@@ -107,7 +103,7 @@ func GetGameInfo(gameID string) (Game, error) {
 
 }
 
-func GetUserCollection(userID string, currentGames []Game) ([]Game, error) {
+func GetUserCollection(userID string, r *http.Request) ([]Game, error) {
 	var res *http.Response
 	var err error
 	var wg sync.WaitGroup
@@ -117,7 +113,21 @@ func GetUserCollection(userID string, currentGames []Game) ([]Game, error) {
 	go func() {
 		defer wg.Done()
 		reqString := "https://boardgamegeek.com/xmlapi2/collection?username=" + url.QueryEscape(userID) + "&own=1&excludesubtype=boardgameexpansion&stats=1&wishlist=0"
-		res, err = http.Get(reqString)
+
+		// Forward the `X-Forwarded-For` header, since (I believe) this is what the
+		// BGG XML API uses to rate limit users. Without this, all requests coming from this
+		// server are subject to the same rate limiting. IMO, this should instead be relative
+		// to the user's making the request. I would instead do this from the browser
+		// if the API didn't have weird CORs shenanigans on non-200 responses.
+		client := &http.Client{}
+		var req *http.Request
+		req, err = http.NewRequest("GET", reqString, nil)
+		if err != nil {
+			log.Error(log.Fields{"userID": userID}, "Failed to create request for user")
+			return
+		}
+		req.Header.Add("X-Forwarded-For", r.Header.Get("X-Forwarded-For"))
+		res, err = client.Do(req)
 		for res.StatusCode == 202 && err == nil && numRetries < 10 {
 			numRetries++
 			time.Sleep(time.Second)
@@ -151,71 +161,4 @@ func GetUserCollection(userID string, currentGames []Game) ([]Game, error) {
 	err = xml.Unmarshal(body, &collRes)
 
 	return collRes.Games, err
-	// var infoErr error
-	// Leaving out getting game info for now, this will probably need to move out to it's own microservice
-	// var gameInfoWG sync.WaitGroup
-	// gameInfoWG.Add(1)
-	// go func() {
-	// 	defer gameInfoWG.Done()
-	// 	for i, game := range collRes.Games {
-	// 		hasGame := false
-	// 		var retrievedGame Game
-	// 		for _, currentGame := range currentGames {
-	// 			if currentGame.Name == game.Name {
-	// 				hasGame = true
-	// 				retrievedGame = currentGame
-	// 			}
-	// 		}
-	// 		if !hasGame {
-	// 			err := collRes.Games[i].getGameInfo()
-	// 			log.Println("recieved info for game: " + game.Name)
-	// 			if err != nil {
-	// 				log.Println("Failed to get info for game " + game.Name)
-	// 				log.Println(err)
-	// 				infoErr = errors.Wrap(infoErr, err.Error())
-	// 			}
-	// 			progressUpdater(float32(i+1)/float32(len(collRes.Games)), collRes.Games[i], true, err)
-	// 			time.Sleep(time.Second)
-	// 		} else {
-	// 			progressUpdater(float32(i+1)/float32(len(collRes.Games)), retrievedGame, false, err)
-	// 		}
-	// 	}
-	// }()
-	// gameInfoWG.Wait()
-	// return collRes.Games, infoErr
 }
-
-// func (game *Game) getGameInfo() error {
-// 	res, err := http.Get("https://boardgamegeek.com/xmlapi2/thing?id=" + url.QueryEscape(game.ID))
-// 	if err != nil {
-// 		return err
-// 	} else if res.StatusCode != 200 {
-// 		body, err := ioutil.ReadAll(res.Body)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		return errors.New("non-200 received from bgg: " + string(body))
-// 	}
-
-// 	body, err := ioutil.ReadAll(res.Body)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	var gameInfo parsedGameInfo
-// 	err = xml.Unmarshal(body, &gameInfo)
-
-// 	var tagsToKeep []Tag
-
-// 	for _, tag := range gameInfo.Tags {
-// 		if tag.Type == "boardgamemechanic" || tag.Type == "boardgamecategory" {
-// 			tagsToKeep = append(tagsToKeep, tag)
-// 		}
-// 	}
-// 	game.Info.MaxPlayers = gameInfo.MaxPlayers.Value
-// 	game.Info.MinPlayers = gameInfo.MinPlayers.Value
-// 	game.Info.MaxPlaytime = gameInfo.MaxPlaytime.Value
-// 	game.Info.MinPlaytime = gameInfo.MinPlaytime.Value
-
-// 	return err
-// }

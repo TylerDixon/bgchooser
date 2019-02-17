@@ -10,8 +10,8 @@ export class GameCollection {
   addGames(games: Array<Game>) {
     this.hasGames = true;
     games.forEach(game => {
-      if (!this.games[game.name]) {
-        this.games[game.name] = new Game(
+      if (!this.games[game.id]) {
+        this.games[game.id] = new Game(
           game.id,
           game.thumbnail,
           game.name,
@@ -79,8 +79,8 @@ export class Game {
   handleUser(user: string, votes: Array<string>, vetoes: Array<string>) {
     const userVetoIndex = this.vetoes.indexOf(user);
     const userVoteIndex = this.votes.indexOf(user);
-    const gameVoteIndex = votes.indexOf(this.name);
-    const gameVetoIndex = vetoes.indexOf(this.name);
+    const gameVoteIndex = votes.indexOf(this.id);
+    const gameVetoIndex = vetoes.indexOf(this.id);
     if (gameVoteIndex > -1) {
       if (userVoteIndex === -1) {
         this.votes.push(user);

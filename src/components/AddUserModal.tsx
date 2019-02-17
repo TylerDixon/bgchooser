@@ -1,12 +1,5 @@
 import React, { ChangeEvent } from "react";
-import {
-  Modal,
-  Input,
-  Button,
-  Message,
-  Checkbox,
-  ItemMeta
-} from "semantic-ui-react";
+import { Modal, Input, Button, Message, Checkbox } from "semantic-ui-react";
 import xml2js from "xml2js";
 import { BggUserInfo, Game, GameCollection } from "../types/game";
 import styles from "./addusermodal.module.scss";
@@ -62,13 +55,21 @@ class AddUserModal extends React.Component<
     return fetch(
       `https://www.boardgamegeek.com/xmlapi2/collection?username=${encodeURIComponent(
         user
-      )}&own=1&excludesubtype=boardgameexpansion&stats=1&wishlist=0`
-    ).then(res => {
-      if (res.status === 202) {
-        return this.getCallIter(user, iter++);
-      }
-      return res;
-    });
+      )}&own=1&excludesubtype=boardgameexpansion&stats=1&wishlist=0`,
+      { mode: "cors" }
+    )
+      .then(res => {
+        if (res.status === 202) {
+          return new Promise<Response>(resolve =>
+            setTimeout(() => resolve(this.getCallIter(user, iter++)), 500)
+          );
+        }
+        return res;
+      })
+      .catch(err => {
+        console.log(err);
+        throw err;
+      });
   };
 
   getUserCall = (user: string, iter: number): Promise<BggUserInfo> => {
@@ -122,9 +123,7 @@ class AddUserModal extends React.Component<
           });
           return;
         }
-        const allGames = res.games.filter(
-          game => !gamesInRoom.games[game.name]
-        );
+        const allGames = res.games.filter(game => !gamesInRoom.games[game.id]);
         if (res.games.length > 0 && allGames.length === 0) {
           this.setState({
             fetchInfo:
@@ -151,6 +150,10 @@ class AddUserModal extends React.Component<
   // Previously, we would get the games from a user via the bgchooser API
   // With too many users though, this results in frequently hitting the
   // BGG API rate limiting
+
+  // Double comment: Decided to put this back into use since BGG XML API doesn't send back CORS
+  // headers on errors, but they do for successful responses... So for now, it's best to just
+  // let the server handle it
   _getBggUser = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const { roomID, gamesInRoom } = this.props;
@@ -175,9 +178,7 @@ class AddUserModal extends React.Component<
           });
           return;
         }
-        const allGames = res.games.filter(
-          game => !gamesInRoom.games[game.name]
-        );
+        const allGames = res.games.filter(game => !gamesInRoom.games[game.id]);
         if (res.games.length > 0 && allGames.length === 0) {
           this.setState({
             fetchInfo:
@@ -271,7 +272,7 @@ class AddUserModal extends React.Component<
         <Modal.Content scrolling>
           <Modal.Description className={styles.modalBody}>
             {allGames.length == 0 && (
-              <form onSubmit={this.getBggUserLocally}>
+              <form onSubmit={this._getBggUser}>
                 <p>
                   Enter the BoardGameGeek username of the collection that you
                   would like to add. You will be able to choose which games in

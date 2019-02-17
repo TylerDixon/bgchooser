@@ -219,16 +219,11 @@ func (a *API) getBggUser(w http.ResponseWriter, r *http.Request) {
 	roomID := vars["roomID"]
 	bggUserID := vars["bggUserID"]
 
-	currentGames, err := a.Storage.GetGamesForRoom(roomID)
-	if err != nil {
-		log.Println("failed to get current games when adding bgg user, roomID: " + roomID)
-	}
-
-	games, err := bggclient.GetUserCollection(bggUserID, currentGames)
+	games, err := bggclient.GetUserCollection(bggUserID, r)
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		// TODO: Scrub error
+		// TODO: Scrub error?
 		w.Write([]byte(err.Error()))
 		return
 	}

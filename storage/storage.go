@@ -62,9 +62,9 @@ func (s *Storage) expire(key string) {
 
 	// No need to return error, as setting the expiration isn't critical
 	if err != nil {
-		log.Error(log.Fields{"key": key, "err": err}, "Failed to set expire on room due to error")
+		log.Warn(log.Fields{"key": key, "err": err}, "Failed to set expire on room due to error")
 	} else if !res {
-		log.Error(log.Fields{"key": key}, "Expire not set on room")
+		log.Warn(log.Fields{"key": key}, "Expire not set on room, key does not exist")
 	}
 }
 

@@ -109,7 +109,6 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
             games: games
           });
           if (res.voteResults.votes) {
-            console.log(games.games);
             Object.keys(res.voteResults.votes).forEach(key =>
               res.voteResults.votes[key].forEach(
                 game => games.games[game] && games.games[game].addVote(key)
@@ -189,27 +188,27 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
     let newVotes = [...votes];
     let newVetoes = [...vetoes];
     if (isVote) {
-      if (vetoes.indexOf(game.name) > -1) {
+      if (vetoes.indexOf(game.id) > -1) {
         game.removeVeto(userID);
-        newVetoes.splice(newVetoes.indexOf(game.name), 1);
+        newVetoes.splice(newVetoes.indexOf(game.id), 1);
       }
-      if (votes.indexOf(game.name) > -1) {
+      if (votes.indexOf(game.id) > -1) {
         game.removeVote(userID);
-        newVotes.splice(newVotes.indexOf(game.name), 1);
+        newVotes.splice(newVotes.indexOf(game.id), 1);
       } else {
-        newVotes.push(game.name);
+        newVotes.push(game.id);
         game.addVote(userID);
       }
     } else {
-      if (votes.indexOf(game.name) > -1) {
+      if (votes.indexOf(game.id) > -1) {
         game.removeVote(userID);
-        newVotes.splice(newVotes.indexOf(game.name), 1);
+        newVotes.splice(newVotes.indexOf(game.id), 1);
       }
-      if (vetoes.indexOf(game.name) > -1) {
+      if (vetoes.indexOf(game.id) > -1) {
         game.removeVeto(userID);
-        newVetoes.splice(newVetoes.indexOf(game.name), 1);
+        newVetoes.splice(newVetoes.indexOf(game.id), 1);
       } else {
-        newVetoes.push(game.name);
+        newVetoes.push(game.id);
         game.addVeto(userID);
       }
     }
@@ -432,8 +431,8 @@ class Room extends Component<RouteComponentProps<RoomRouteParams>, RoomState> {
                     game.info.maxPlayers >= selectedNumPlayers) ||
                   selectedNumPlayers === 0;
                 if (inPlayerCount) {
-                  const isVote = votes.indexOf(game.name) > -1;
-                  const isVeto = vetoes.indexOf(game.name) > -1;
+                  const isVote = votes.indexOf(game.id) > -1;
+                  const isVeto = vetoes.indexOf(game.id) > -1;
                   return (
                     <Card>
                       <Card.Content>
