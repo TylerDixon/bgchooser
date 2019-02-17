@@ -1,7 +1,17 @@
 import React, { ChangeEvent } from "react";
-import { Modal, Input, Button, Message, Checkbox } from "semantic-ui-react";
+import {
+  Modal,
+  Input,
+  Button,
+  Message,
+  Checkbox,
+  ItemMeta
+} from "semantic-ui-react";
+import xml2js from "xml2js";
 import { BggUserInfo, Game, GameCollection } from "../types/game";
 import styles from "./addusermodal.module.scss";
+
+const MAX_GET_USER_ITER = 10;
 
 interface AddUserModalProps {
   addGames: (games: Array<Game>) => void;
@@ -41,7 +51,107 @@ class AddUserModal extends React.Component<
     this.setState({ bggUser: element.value });
   };
 
-  getBggUser = (e: React.FormEvent<HTMLFormElement>) => {
+  getCallIter = (user: string, iter: number): Promise<Response> => {
+    if (iter > MAX_GET_USER_ITER) {
+      return Promise.reject(
+        new Error(
+          "Max number of retries to get BGG User reached, please try again."
+        )
+      );
+    }
+    return fetch(
+      `https://www.boardgamegeek.com/xmlapi2/collection?username=${encodeURIComponent(
+        user
+      )}&own=1&excludesubtype=boardgameexpansion&stats=1&wishlist=0`
+    ).then(res => {
+      if (res.status === 202) {
+        return this.getCallIter(user, iter++);
+      }
+      return res;
+    });
+  };
+
+  getUserCall = (user: string, iter: number): Promise<BggUserInfo> => {
+    return this.getCallIter(user, iter)
+      .then(res => {
+        if (!res.ok) {
+          return res.text().then(text => Promise.reject(new Error(text)));
+        }
+        return res.text();
+      })
+      .then((str: string) => {
+        const p = new Promise(function(resolve, reject) {
+          xml2js.parseString(str, (err, result) => {
+            if (err) {
+              reject(err);
+            }
+            resolve(result);
+          });
+        });
+        return p;
+      })
+      .then((xml: any) => {
+        var info: BggUserInfo = { games: [] };
+        info.games = xml.items.item.map((item: any) => {
+          return new Game(item.$.objectid, item.thumbnail[0], item.name[0]._, {
+            minPlayers: parseInt(item.stats[0].$.minplayers, 10),
+            maxPlayers: parseInt(item.stats[0].$.maxplayers, 10),
+            minPlaytime: parseInt(item.stats[0].$.minplaytime, 10),
+            maxPlaytime: parseInt(item.stats[0].$.maxplaytime, 10)
+          });
+        });
+        return info;
+      });
+  };
+
+  getBggUserLocally = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const { gamesInRoom } = this.props;
+    const { bggUser } = this.state;
+    if (bggUser.length === 0) {
+      return;
+    }
+    this.setState({ fetchError: undefined, loading: true });
+    this.getUserCall(bggUser, 1)
+      .then((res: BggUserInfo) => {
+        if (!res.games) {
+          this.setState({
+            fetchError: new Error("User not found"),
+            fetchErrorUser: bggUser,
+            loading: false
+          });
+          return;
+        }
+        const allGames = res.games.filter(
+          game => !gamesInRoom.games[game.name]
+        );
+        if (res.games.length > 0 && allGames.length === 0) {
+          this.setState({
+            fetchInfo:
+              "All of this user's games have already been added to the room, try another user",
+            loading: false
+          });
+          return;
+        }
+        this.setState({
+          allGames,
+          loading: false
+        });
+      })
+      .catch((err: Error) => {
+        this.setState({
+          fetchError: err,
+          fetchErrorUser: bggUser,
+          loading: false
+        });
+      });
+  };
+
+  // No longer used, keeping around in case this approach wants to be taken again
+  // Previously, we would get the games from a user via the bgchooser API
+  // With too many users though, this results in frequently hitting the
+  // BGG API rate limiting
+  _getBggUser = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const { roomID, gamesInRoom } = this.props;
     const { bggUser } = this.state;
@@ -161,7 +271,7 @@ class AddUserModal extends React.Component<
         <Modal.Content scrolling>
           <Modal.Description className={styles.modalBody}>
             {allGames.length == 0 && (
-              <form onSubmit={this.getBggUser}>
+              <form onSubmit={this.getBggUserLocally}>
                 <p>
                   Enter the BoardGameGeek username of the collection that you
                   would like to add. You will be able to choose which games in
@@ -185,6 +295,10 @@ class AddUserModal extends React.Component<
                       Failed to retrieve games for user {fetchErrorUser}
                     </Message.Header>
                     <p>{fetchError.message}</p>
+                    <p>
+                      User may not be found, either try again or try another
+                      user name.
+                    </p>
                   </Message>
                 )}
                 <a onClick={switchGameModal} className={styles.switchModalLink}>

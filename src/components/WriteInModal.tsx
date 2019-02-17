@@ -182,7 +182,6 @@ class WriteInModal extends React.Component<
                   </div>
                 </div>
               )}
-              {...this.props}
             />
             <a onClick={switchGameModal} className={styles.switchModalLink}>
               Add a BGG user collection instead
