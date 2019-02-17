@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -15,7 +14,6 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 
-	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/tylerdixon/bgchooser/bggclient"
@@ -40,6 +38,8 @@ type ConnectionContext struct {
 func init() {
 	rand.Seed(time.Now().Unix())
 }
+
+var randRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
 type loggingResponseWriter struct {
 	http.ResponseWriter
@@ -78,54 +78,8 @@ func New() API {
 	}
 	api.Storage = stor
 
-	socketServer, err := api.newSocketServer()
-	if err != nil {
-		log.Fatal(err)
-		panic(err.Error())
-	}
-
-	api.SocketServer = socketServer
 	api.Router = mux.NewRouter().PathPrefix("/api").Subrouter().StrictSlash(false)
 
-	echo := func(w http.ResponseWriter, r *http.Request) {
-		c, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			log.Print("upgrade:", err)
-			return
-		}
-		defer c.Close()
-		mt, message, err := c.ReadMessage()
-		// TODO: error if bad msg
-		roomID := strings.Split(string(message), ":")[1]
-		close := api.Storage.SubscribeToRoomInfo(roomID, func(msg storage.RoomSubscriptionMessage) {
-			log.Info(log.Fields{"roomID": roomID, "msgType": msg.Type}, "Socket event sent")
-			returnMsg, err := json.Marshal(msg)
-			if err != nil {
-				log.Println("Failed to marshal games to emit to user: " + err.Error())
-			}
-			c.WriteMessage(mt, returnMsg)
-		})
-		defer close()
-		shouldClose := false
-		c.SetCloseHandler(func(code int, msg string) error {
-			shouldClose = true
-			close()
-			return nil
-		})
-		for !shouldClose {
-			_, _, err := c.ReadMessage()
-			if err != nil {
-				log.Println("socket err: " + err.Error())
-				break
-			}
-		}
-	}
-
-	// fs := http.FileServer(http.Dir("build"))
-	// api.Router.Handle("/", fs)
-	// api.Router.Handle("/static/", http.FileServer(http.Dir("./build")))
-	// api.Router.Handle("/static/css", http.FileServer(http.Dir("./build")))
-	// Serve static files
 	api.Router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./build/static/"))))
 	api.Router.Use(mux.MiddlewareFunc(func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -169,23 +123,63 @@ func New() API {
 	}))
 
 	// Serve index page on all unhandled routes
-	api.Router.HandleFunc("/echo", echo)
+	api.Router.HandleFunc("/init", api.socketInit)
 	api.Router.HandleFunc("/rooms", NewRoom).Methods("POST")
 	api.Router.HandleFunc("/rooms/{roomID}", api.GetRoomInfo).Methods("GET")
-	api.Router.HandleFunc("/rooms/{roomID}/bgguser/{bggUserID}", api.GetBggUser).Methods("GET")
-	api.Router.HandleFunc("/rooms/{roomID}/bgguser/{bggUserID}", api.AddBggUser).Methods("POST")
-	api.Router.HandleFunc("/rooms/{roomID}/vote/reset", api.ResetVotes).Methods("POST")
-	api.Router.HandleFunc("/rooms/{roomID}/vote/{userID}", api.AddVotesToRoom).Methods("POST")
-	api.Router.HandleFunc("/rooms/{roomID}/games/{userID}/{gameID}", api.AddGame).Methods("POST")
+	api.Router.HandleFunc("/rooms/{roomID}/bgguser/{bggUserID}", api.getBggUser).Methods("GET")
+	api.Router.HandleFunc("/rooms/{roomID}/bgguser/{bggUserID}", api.addBggUser).Methods("POST")
+	api.Router.HandleFunc("/rooms/{roomID}/vote/reset", api.resetVotes).Methods("POST")
+	api.Router.HandleFunc("/rooms/{roomID}/vote/{userID}", api.addVotesToRoom).Methods("POST")
+	api.Router.HandleFunc("/rooms/{roomID}/games/{userID}/{gameID}", api.addGame).Methods("POST")
 	api.Router.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "./build/index.html")
 	})
 	return api
 }
 
+func (api *API) socketInit(w http.ResponseWriter, r *http.Request) {
+	c, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Print("upgrade:", err)
+		return
+	}
+	defer c.Close()
+	mt, message, err := c.ReadMessage()
+	splitMsg := strings.Split(string(message), ":")
+	if len(splitMsg) < 2 {
+		log.Error(log.Fields{"socketMsg": string(message)}, "Malformed message received in socket init")
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	roomID := splitMsg[1]
+	close := api.Storage.SubscribeToRoomInfo(roomID, func(msg storage.RoomSubscriptionMessage) {
+		log.Info(log.Fields{"roomID": roomID, "msgType": msg.Type}, "Socket event sent")
+		returnMsg, err := json.Marshal(msg)
+		if err != nil {
+			log.Println("Failed to marshal games to emit to user: " + err.Error())
+		}
+		c.WriteMessage(mt, returnMsg)
+	})
+	defer close()
+	shouldClose := false
+	c.SetCloseHandler(func(code int, msg string) error {
+		shouldClose = true
+		close()
+		return nil
+	})
+	for !shouldClose {
+		_, _, err := c.ReadMessage()
+		if err != nil {
+			log.Println("socket err: " + err.Error())
+			break
+		}
+	}
+}
+
+// Start begins the api listening on the given port
 func (a *API) Start(port string) error {
 	log.Println("Listening on port " + port)
-	return http.ListenAndServe(port, handlers.CORS(handlers.AllowCredentials(), handlers.AllowedOrigins([]string{"*"}))(a.Router))
+	return http.ListenAndServe(port, a.Router)
 }
 
 type NewRoomRes struct {
@@ -193,9 +187,12 @@ type NewRoomRes struct {
 }
 
 func NewRoom(w http.ResponseWriter, r *http.Request) {
-	id := fmt.Sprintf("%05d", rand.Intn(89999)+10000)
+	b := make([]rune, 10)
+	for i := range b {
+		b[i] = randRunes[rand.Intn(len(randRunes))]
+	}
 	res := NewRoomRes{
-		RoomID: id,
+		RoomID: string(b),
 	}
 	byteRes, err := json.Marshal(res)
 	if err != nil {
@@ -217,7 +214,7 @@ type AddGamesMessage struct {
 	NewGame  bool           `json:"newGame"`
 }
 
-func (a *API) GetBggUser(w http.ResponseWriter, r *http.Request) {
+func (a *API) getBggUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	roomID := vars["roomID"]
 	bggUserID := vars["bggUserID"]
@@ -253,7 +250,7 @@ func (a *API) GetBggUser(w http.ResponseWriter, r *http.Request) {
 	w.Write(byteRes)
 }
 
-func (a *API) AddBggUser(w http.ResponseWriter, r *http.Request) {
+func (a *API) addBggUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	roomID := vars["roomID"]
 	bggUserID := vars["bggUserID"]
@@ -342,12 +339,12 @@ func (a *API) GetRoomInfo(w http.ResponseWriter, r *http.Request) {
 	w.Write(resBody)
 }
 
-type AddVotesToRoomBody struct {
+type addVotesToRoomBody struct {
 	Votes  []string `json:"votes"`
 	Vetoes []string `json:"vetoes"`
 }
 
-func (a *API) AddVotesToRoom(w http.ResponseWriter, r *http.Request) {
+func (a *API) addVotesToRoom(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	roomID := vars["roomID"]
 	userID := vars["userID"]
@@ -357,7 +354,7 @@ func (a *API) AddVotesToRoom(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("failed to read body from request: " + err.Error()))
 		return
 	}
-	var votes AddVotesToRoomBody
+	var votes addVotesToRoomBody
 	err = json.Unmarshal(body, &votes)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -365,7 +362,7 @@ func (a *API) AddVotesToRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = a.Storage.AddUserVotes(roomID, userID, votes.Votes, votes.Vetoes)
+	err = a.Storage.SetUserVotes(roomID, userID, votes.Votes, votes.Vetoes)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("failed to write votes to storage: " + err.Error()))
@@ -376,7 +373,7 @@ func (a *API) AddVotesToRoom(w http.ResponseWriter, r *http.Request) {
 	// TODO: notify users of new votes
 }
 
-func (a *API) ResetVotes(w http.ResponseWriter, r *http.Request) {
+func (a *API) resetVotes(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	roomID := vars["roomID"]
 	err := a.Storage.ResetRoomVotes(roomID)
@@ -389,11 +386,11 @@ func (a *API) ResetVotes(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-type AddGameRes struct {
+type addGameRes struct {
 	Game bggclient.Game `json:"game"`
 }
 
-func (a *API) AddGame(w http.ResponseWriter, r *http.Request) {
+func (a *API) addGame(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	roomID := vars["roomID"]
 	gameID := vars["gameID"]
@@ -413,7 +410,7 @@ func (a *API) AddGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resBody, err := json.Marshal(AddGameRes{game})
+	resBody, err := json.Marshal(addGameRes{game})
 	if err != nil {
 		log.Error(log.Fields{
 			"roomID": roomID,
@@ -425,44 +422,4 @@ func (a *API) AddGame(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(resBody)
-}
-
-func (api *API) newSocketServer() (*socketio.Server, error) {
-	server, err := socketio.NewServer(nil)
-	if err != nil {
-		return nil, err
-	}
-	server.OnConnect("/", func(s socketio.Conn) error {
-		fmt.Println("connected:", s.ID())
-		return nil
-	})
-	server.OnEvent("/", "register", func(s socketio.Conn, roomID string) {
-		var ctx ConnectionContext
-		ctx.Close = api.Storage.SubscribeToRoomInfo(roomID, func(msg storage.RoomSubscriptionMessage) {
-			log.Info(log.Fields{"roomID": roomID, "msgType": msg.Type}, "Socket event sent")
-			gamesToEmit, err := json.Marshal(msg.Games)
-			if err != nil {
-				log.WithError(err).Error("Failed to marshal games to emit to user")
-			}
-			s.Emit(string(msg.Type), msg.User, gamesToEmit)
-		})
-		s.SetContext(ctx)
-	})
-	server.OnEvent("/", "disconnect", func(s socketio.Conn) {
-		s.Close()
-	})
-	server.OnError("/", func(e error) {
-		//TODO: err
-		fmt.Println("meet error:", e)
-	})
-	server.OnDisconnect("/", func(s socketio.Conn, msg string) {
-		//TODO: Is this called on socket connection close?
-		ctx := s.Context().(ConnectionContext)
-		if ctx.Close() != nil {
-			//TODO: Actually figure out logging with errors
-			log.Println("Failed to close subscription: " + err.Error())
-		}
-	})
-	go server.Serve()
-	return server, err
 }

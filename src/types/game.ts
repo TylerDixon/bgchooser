@@ -121,12 +121,6 @@ export interface GameInfo {
   maxPlayers: number;
   minPlaytime: number;
   maxPlaytime: number;
-  tags?: Array<Tag>;
-}
-
-export interface Tag {
-  id: string;
-  label: string;
 }
 
 export interface BggUserInfo {

@@ -1,12 +1,5 @@
 import React, { ChangeEvent } from "react";
-import {
-  Modal,
-  Icon,
-  Input,
-  Button,
-  Message,
-  Checkbox
-} from "semantic-ui-react";
+import { Modal, Input, Button, Message, Checkbox } from "semantic-ui-react";
 import { BggUserInfo, Game, GameCollection } from "../types/game";
 import styles from "./addusermodal.module.scss";
 
@@ -176,13 +169,14 @@ class AddUserModal extends React.Component<
                 </p>
                 <Input
                   name="bggUser"
+                  placeholder="BGG User Name"
                   value={bggUser}
                   onChange={this.onUpdateBggUser}
                   action
                 >
                   <input />
                   <Button loading={loading} disabled={loading} type="submit">
-                    Get BGG User
+                    Get BGG User Games
                   </Button>
                 </Input>
                 {fetchError && (

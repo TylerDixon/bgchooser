@@ -2,19 +2,14 @@ import React, { ChangeEvent } from "react";
 import _ from "lodash";
 import {
   Modal,
-  Icon,
-  Input,
   Button,
   Message,
-  Checkbox,
   Search,
   SearchResultData,
   SearchProps
 } from "semantic-ui-react";
 import xml2js from "xml2js";
-import { BggUserInfo, Game, GameCollection, AddGameRes } from "../types/game";
-import { NumericDictionary } from "lodash";
-import { number } from "prop-types";
+import { Game, GameCollection, AddGameRes } from "../types/game";
 import styles from "./writeinmodal.module.scss";
 
 interface SearchGame {
